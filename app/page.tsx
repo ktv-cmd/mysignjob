@@ -48,7 +48,7 @@ export default async function Home() {
         </p>
         <div className="flex items-center justify-center gap-4">
           <Link
-            href="/register"
+            href="/order/new"
             className="bg-accent text-accent-foreground px-8 py-3.5 rounded-xl text-base font-semibold hover:opacity-90 transition-opacity"
           >
             Get Your Sign →

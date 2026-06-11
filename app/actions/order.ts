@@ -11,7 +11,7 @@ export async function createOrder(params: {
 }): Promise<{ error: string } | { orderId: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
+  if (!user) redirect("/login?next=/order/new")
 
   // Upload storefront photo to Supabase Storage
   const photoBase64 = params.photoDataUrl.split(",")[1]

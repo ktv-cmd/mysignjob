@@ -3,9 +3,8 @@
   "configurations": [
     {
       "name": "my-sign-job",
-      "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
-      "cwd": "/Users/kaykovmedia/Desktop/webs/my-sign-job",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": ["/Users/kaykovmedia/start-mysignjob.sh"],
       "port": 3000,
       "autoPort": false
     }

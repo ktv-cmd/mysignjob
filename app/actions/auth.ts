@@ -8,6 +8,7 @@ export type AuthState = { error: string } | null
 export async function signIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const email = String(formData.get("email") ?? "").trim()
   const password = String(formData.get("password") ?? "")
+  const next = String(formData.get("next") ?? "").trim()
 
   const supabase = await createClient()
   const { error } = await supabase.auth.signInWithPassword({ email, password })
@@ -24,6 +25,7 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
 
   if (profile?.role === "admin") redirect("/admin")
   if (profile?.role === "sc") redirect("/sc/dashboard")
+  if (next && next.startsWith("/")) redirect(next)
   redirect("/dashboard")
 }
 
