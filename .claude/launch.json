@@ -1,0 +1,13 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "my-sign-job",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "/Users/kaykovmedia/Desktop/webs/my-sign-job",
+      "port": 3000,
+      "autoPort": false
+    }
+  ]
+}
