@@ -39,15 +39,43 @@ One photorealistic 16:9 render with the sign physically integrated into the buil
 type SignType = "flat_cut" | "channel_letters" | "cabinet" | "blade" | "window_vinyl" | "monument" | "pylon" | "awning" | "other"
 
 // Sign types that support AI preview in v1
-const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl"]
+const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl", "awning"]
 
 function buildSignPrompt(params: {
   businessName: string
   signType: SignType
   primaryColor: string
   illumination: string
+  awningFrame?: string
+  fabricName?: string
 }) {
-  const { businessName, signType, primaryColor, illumination } = params
+  const { businessName, signType, primaryColor, illumination, awningFrame, fabricName } = params
+
+  const lightDesc: Record<string, string> = {
+    none: "no artificial illumination — natural daylight shadows only",
+    internal_led: "front-lit with internal LED illumination (glowing faces)",
+    external: "externally flood-lit from above",
+    halo: "back-lit halo glow behind the letters",
+    neon: "neon tube lighting",
+    digital: "digital LED display",
+  }
+
+  // Awning-specific prompt with frame shape and Sunbrella fabric detail
+  if (signType === "awning") {
+    const framePhrase = awningFrame ?? "classic slope shed awning"
+    const fabricDesc = fabricName ? `in ${fabricName} Sunbrella® acrylic fabric` : `in a solid commercial-grade awning fabric (color: ${primaryColor})`
+    return [
+      `Generate a photorealistic architectural photo of the storefront.`,
+      `Inside the golden highlighted area, install a professional fabric storefront awning`,
+      `with a ${framePhrase} profile, ${fabricDesc}.`,
+      `The business name "${businessName}" must be printed in clean white lettering on the front valence of the awning.`,
+      `The awning frame is powder-coated metal; the fabric drapes naturally with correct tension and shadow.`,
+      `Lighting: ${lightDesc[illumination] ?? "natural daylight"}.`,
+      `The awning must be physically mounted to the building fascia — no floating.`,
+      `Completely replace the golden highlighted area with this awning,`,
+      `restoring the original wall texture in any exposed areas around it.`,
+    ].join(" ")
+  }
 
   const signDesc: Record<SignType, string> = {
     flat_cut: "flat-cut dimensional letters",
@@ -59,15 +87,6 @@ function buildSignPrompt(params: {
     pylon: "pylon sign",
     awning: "fabric awning sign",
     other: "dimensional sign",
-  }
-
-  const lightDesc: Record<string, string> = {
-    none: "no artificial illumination — natural daylight shadows only",
-    internal_led: "front-lit with internal LED illumination (glowing faces)",
-    external: "externally flood-lit from above",
-    halo: "back-lit halo glow behind the letters",
-    neon: "neon tube lighting",
-    digital: "digital LED display",
   }
 
   return [
@@ -91,9 +110,11 @@ export async function POST(req: NextRequest) {
       businessName: string
       primaryColor: string
       illumination: string
+      awningFrame?: string
+      fabricName?: string
     }
 
-    const { imageDataUrl, quad, signType, businessName, primaryColor, illumination } = body
+    const { imageDataUrl, quad, signType, businessName, primaryColor, illumination, awningFrame, fabricName } = body
 
     if (!imageDataUrl || !quad || quad.length !== 4)
       return NextResponse.json({ error: "imageDataUrl and 4-point quad required" }, { status: 400 })
@@ -143,7 +164,7 @@ export async function POST(req: NextRequest) {
     const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = await import("@google/genai")
     const ai = new GoogleGenAI({ apiKey })
 
-    const prompt = buildSignPrompt({ businessName, signType, primaryColor, illumination })
+    const prompt = buildSignPrompt({ businessName, signType, primaryColor, illumination, awningFrame, fabricName })
 
     type Part = { text: string } | { inlineData: { mimeType: string; data: string } }
     const parts: Part[] = [

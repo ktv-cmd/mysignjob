@@ -48,6 +48,27 @@ export type SignMaterial = "aluminum" | "acrylic" | "vinyl" | "wood" | "foam" | 
 
 export type IlluminationType = "none" | "internal_led" | "external" | "halo" | "neon" | "digital"
 
+// 12 awning frame styles (from industry standard chart)
+export type AwningFrameStyle =
+  | "standard_valence"
+  | "standard"
+  | "arch"
+  | "bullnose"
+  | "dome"
+  | "circular"
+  | "gable"
+  | "half_round"
+  | "quarter_round"
+  | "concave"
+  | "waterfall"
+  | "box"
+
+export interface SunbrellaFabric {
+  name: string   // e.g. "Pacific Blue"
+  code: string   // e.g. "4601"
+  hex: string    // approximate swatch color
+}
+
 export interface SignSpec {
   sign_type: SignType
   width_inches: number
@@ -69,6 +90,9 @@ export interface SignSpec {
     { x: number; y: number },
     { x: number; y: number },
   ]
+  // Awning-specific (only when sign_type === "awning")
+  awning_frame_style?: AwningFrameStyle
+  awning_fabric?: SunbrellaFabric
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────

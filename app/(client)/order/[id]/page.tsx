@@ -115,21 +115,37 @@ export default async function OrderPage({
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <Row label="Business Name" value={spec.business_name} />
           <Row label="Sign Type" value={SIGN_TYPE_LABELS[spec.sign_type] ?? spec.sign_type} />
-          <Row label="Primary Color" value={
-            <span className="flex items-center gap-2">
-              <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.primary_color }} />
-              {spec.primary_color}
-            </span>
-          } />
-          {spec.secondary_color && (
-            <Row label="Secondary Color" value={
+          {spec.sign_type === "awning" && spec.awning_frame_style ? (
+            <Row label="Frame Style" value={
+              spec.awning_frame_style.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())
+            } />
+          ) : (
+            <Row label="Primary Color" value={
               <span className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.secondary_color }} />
-                {spec.secondary_color}
+                <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.primary_color }} />
+                {spec.primary_color}
               </span>
             } />
           )}
-          {spec.material && <Row label="Material" value={spec.material} />}
+          {spec.sign_type === "awning" && spec.awning_fabric ? (
+            <Row label="Sunbrella® Fabric" value={
+              <span className="flex items-center gap-2">
+                <span className="w-4 h-4 rounded border border-border inline-block flex-shrink-0" style={{ background: spec.awning_fabric.hex }} />
+                {spec.awning_fabric.name}
+                <span className="text-xs text-muted-foreground">#{spec.awning_fabric.code}</span>
+              </span>
+            } />
+          ) : (
+            spec.secondary_color && (
+              <Row label="Secondary Color" value={
+                <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.secondary_color }} />
+                  {spec.secondary_color}
+                </span>
+              } />
+            )
+          )}
+          {spec.sign_type !== "awning" && spec.material && <Row label="Material" value={spec.material} />}
           <Row label="Illumination" value={ILLUMINATION_LABELS[spec.illumination] ?? spec.illumination} />
           {(spec.width_inches || spec.height_inches) && (
             <Row label="Estimated Size" value={`${spec.width_inches ?? "?"}″ W × ${spec.height_inches ?? "?"}″ H`} />

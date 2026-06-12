@@ -6,7 +6,7 @@ import PhotoUpload from "@/components/order/PhotoUpload"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
 import { formatDimensions } from "@/lib/utils"
-import type { SignType, SignMaterial, IlluminationType, SignSpec } from "@/types"
+import type { SignType, SignMaterial, IlluminationType, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
 
@@ -55,6 +55,53 @@ const MATERIAL_OPTS: { value: SignMaterial; label: string }[] = [
   { value: "wood",     label: "Wood" },
 ]
 
+// ── Awning frame styles (industry standard — most common is "standard" shed slope)
+const AWNING_FRAMES: { value: AwningFrameStyle; label: string; desc: string; aiPhrase: string }[] = [
+  { value: "standard_valence", label: "Standard w/ Valence", desc: "Sloped + front valence drop", aiPhrase: "traditional slope awning with a front valence drop" },
+  { value: "standard",         label: "Standard",            desc: "Classic slope — most common", aiPhrase: "classic slope shed awning" },
+  { value: "arch",             label: "Arch",                desc: "Curved top, flat base",       aiPhrase: "arched curved-top awning" },
+  { value: "bullnose",         label: "Bullnose",            desc: "Rounded convex front",        aiPhrase: "bullnose convex-front rounded awning" },
+  { value: "dome",             label: "Dome",                desc: "Full semicircle dome",        aiPhrase: "full dome semicircular awning" },
+  { value: "circular",         label: "Circular",            desc: "Gentle half-barrel curve",    aiPhrase: "circular barrel-curved awning" },
+  { value: "gable",            label: "Gable",               desc: "Peaked ridge roof shape",     aiPhrase: "gable peaked-ridge awning" },
+  { value: "half_round",       label: "Half Round",          desc: "Arched with swept sides",     aiPhrase: "half-round arch awning with swept sides" },
+  { value: "quarter_round",    label: "Quarter Round",       desc: "Quarter-circle from wall",    aiPhrase: "quarter-round curved awning projecting from wall" },
+  { value: "concave",          label: "Concave",             desc: "Inward curved, dramatic flair",aiPhrase: "concave inward-curved awning" },
+  { value: "waterfall",        label: "Waterfall",           desc: "Sweeping cascade curve",      aiPhrase: "waterfall cascading curved awning" },
+  { value: "box",              label: "Box",                 desc: "Flat top, boxy profile",      aiPhrase: "flat-top box awning with straight returns" },
+]
+
+// ── Sunbrella Awning/Marine Grade solid fabric palette (10-yr warranty, weatherproof)
+// Codes are official Sunbrella SKU prefixes; hex values are visual approximations for swatches.
+const SUNBRELLA_COLORS: SunbrellaFabric[] = [
+  { name: "Natural",        code: "4604", hex: "#F2EFE4" },
+  { name: "White",          code: "4634", hex: "#FAFAFA" },
+  { name: "Parchment",      code: "6083", hex: "#E5DCC3" },
+  { name: "Beige",          code: "4620", hex: "#D9CDB3" },
+  { name: "Toast",          code: "4628", hex: "#8B6B56" },
+  { name: "Cocoa",          code: "6076", hex: "#5C4232" },
+  { name: "Walnut Brown",   code: "4618", hex: "#5C4B3B" },
+  { name: "Terracotta",     code: "4622", hex: "#A84E34" },
+  { name: "Orange",         code: "6009", hex: "#D2622A" },
+  { name: "Sunflower",      code: "4602", hex: "#E0A92B" },
+  { name: "Erin Green",     code: "6000", hex: "#2E6B3E" },
+  { name: "Basil",          code: "4688", hex: "#3E5641" },
+  { name: "Forest Green",   code: "4637", hex: "#1F3D2B" },
+  { name: "Sky Blue",       code: "6024", hex: "#5B8FB9" },
+  { name: "Pacific Blue",   code: "4601", hex: "#1C3F6E" },
+  { name: "Royal Blue",     code: "4617", hex: "#2E4A7A" },
+  { name: "Sapphire Blue",  code: "6041", hex: "#1B4F8A" },
+  { name: "Navy",           code: "6026", hex: "#1E2A44" },
+  { name: "Burgundy",       code: "4631", hex: "#5C1A2B" },
+  { name: "Black Cherry",   code: "6040", hex: "#4A1C28" },
+  { name: "Silver",         code: "4651", hex: "#B8BCC0" },
+  { name: "Cadet Grey",     code: "6030", hex: "#8A9499" },
+  { name: "Slate",          code: "4684", hex: "#4D5358" },
+  { name: "Black",          code: "4608", hex: "#1C1C1C" },
+]
+
+const DEFAULT_AWNING_FABRIC = SUNBRELLA_COLORS.find(c => c.code === "4601")! // Pacific Blue
+
 export default function NewOrderPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("photo")
@@ -79,6 +126,9 @@ export default function NewOrderPage() {
   const [material, setMaterial] = useState<SignMaterial>("aluminum")
   const [illumination, setIllumination] = useState<IlluminationType>("none")
   const [notes, setNotes] = useState("")
+  // Awning-specific
+  const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("standard")
+  const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
 
   const stepIdx = STEPS.indexOf(step)
 
@@ -113,7 +163,13 @@ export default function NewOrderPage() {
       const res = await fetch("/api/order/generate-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ imageDataUrl: photoDataUrl, quad, signType, businessName, primaryColor, illumination }),
+        body: JSON.stringify({
+          imageDataUrl: photoDataUrl, quad, signType, businessName,
+          primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
+          illumination,
+          awningFrame: signType === "awning" ? awningFrame : undefined,
+          fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+        }),
       })
       const data = await res.json()
       if (data.skipped) { setPreviewSkipped(true); return }
@@ -144,14 +200,18 @@ export default function NewOrderPage() {
       height_inches: sizeResult.heightInches,
       width_confidence: sizeResult.confidence,
       business_name: businessName,
-      primary_color: primaryColor,
-      secondary_color: secondaryColor || null,
-      material,
+      primary_color: signType === "awning" ? awningFabric.hex : primaryColor,
+      secondary_color: signType === "awning" ? null : (secondaryColor || null),
+      material: signType === "awning" ? "vinyl" : material, // fabric replaces material for awnings
       illumination,
       custom_notes: notes || null,
       estimation_references: sizeResult.referencesUsed,
       estimation_angle_warning: sizeResult.angleWarning,
       selection_quad: quad as SignSpec["selection_quad"],
+      ...(signType === "awning" && {
+        awning_frame_style: awningFrame,
+        awning_fabric: awningFabric,
+      }),
     }
 
     startSubmit(async () => {
@@ -325,75 +385,157 @@ export default function NewOrderPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium mb-2">Primary color</label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={primaryColor}
-                    onChange={e => setPrimaryColor(e.target.value)}
-                    className="w-10 h-10 rounded border border-border cursor-pointer"
-                  />
-                  <input
-                    value={primaryColor}
-                    onChange={e => setPrimaryColor(e.target.value)}
-                    className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
-                  />
+            {/* ── Awning-specific options ── */}
+            {signType === "awning" ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-1">Frame style</label>
+                  <p className="text-xs text-muted-foreground mb-2">Choose the awning profile shape. <span className="font-medium">Standard</span> is the most common for storefronts.</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    {AWNING_FRAMES.map(f => (
+                      <button
+                        key={f.value}
+                        type="button"
+                        onClick={() => setAwningFrame(f.value)}
+                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
+                          ${awningFrame === f.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                      >
+                        <span className="block font-medium">{f.label}</span>
+                        <span className="block text-[10px] text-muted-foreground mt-0.5">{f.desc}</span>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-2">Secondary color <span className="text-muted-foreground font-normal">(optional)</span></label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="color"
-                    value={secondaryColor || "#ffffff"}
-                    onChange={e => setSecondaryColor(e.target.value)}
-                    className="w-10 h-10 rounded border border-border cursor-pointer"
-                  />
-                  <input
-                    value={secondaryColor}
-                    onChange={e => setSecondaryColor(e.target.value)}
-                    placeholder="#ffffff"
-                    className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
-                  />
+
+                <div>
+                  <label className="block text-sm font-medium mb-1">Sunbrella® fabric color</label>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Commercial-grade awning fabric — 10-yr warranty, UV & weather resistant.
+                    Selected: <span className="font-medium">{awningFabric.name}</span>
+                    <span className="text-muted-foreground"> · #{awningFabric.code}</span>
+                  </p>
+                  <div className="grid grid-cols-6 gap-2">
+                    {SUNBRELLA_COLORS.map(c => (
+                      <button
+                        key={c.code}
+                        type="button"
+                        title={`${c.name} (${c.code})`}
+                        onClick={() => setAwningFabric(c)}
+                        className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                          ${awningFabric.code === c.code ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
+                      >
+                        <div className="w-full h-full" style={{ background: c.hex }} />
+                        <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                          <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
+                        </div>
+                        {awningFabric.code === c.code && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <span className="text-white text-sm drop-shadow">✓</span>
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <div className="w-5 h-5 rounded border border-border flex-shrink-0" style={{ background: awningFabric.hex }} />
+                    <span className="text-sm font-medium">{awningFabric.name}</span>
+                    <span className="text-xs text-muted-foreground">Sunbrella® {awningFabric.code}</span>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">Illumination</label>
-              <div className="grid grid-cols-2 gap-2">
-                {ILLUMINATION_OPTS.map(o => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => setIllumination(o.value)}
-                    className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
-                      ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Illumination</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: "none" as IlluminationType, label: "No lighting (day only)" },
+                      { value: "external" as IlluminationType, label: "External floodlight" },
+                    ].map(o => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setIllumination(o.value)}
+                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
+                          ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Primary color</label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={primaryColor}
+                        onChange={e => setPrimaryColor(e.target.value)}
+                        className="w-10 h-10 rounded border border-border cursor-pointer"
+                      />
+                      <input
+                        value={primaryColor}
+                        onChange={e => setPrimaryColor(e.target.value)}
+                        className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Secondary color <span className="text-muted-foreground font-normal">(optional)</span></label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={secondaryColor || "#ffffff"}
+                        onChange={e => setSecondaryColor(e.target.value)}
+                        className="w-10 h-10 rounded border border-border cursor-pointer"
+                      />
+                      <input
+                        value={secondaryColor}
+                        onChange={e => setSecondaryColor(e.target.value)}
+                        placeholder="#ffffff"
+                        className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
+                      />
+                    </div>
+                  </div>
+                </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-2">Material preference</label>
-              <div className="flex flex-wrap gap-2">
-                {MATERIAL_OPTS.map(o => (
-                  <button
-                    key={o.value}
-                    type="button"
-                    onClick={() => setMaterial(o.value)}
-                    className={`rounded-full px-3 py-1 text-xs border transition-colors
-                      ${material === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                  >
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Illumination</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {ILLUMINATION_OPTS.map(o => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setIllumination(o.value)}
+                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
+                          ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Material preference</label>
+                  <div className="flex flex-wrap gap-2">
+                    {MATERIAL_OPTS.map(o => (
+                      <button
+                        key={o.value}
+                        type="button"
+                        onClick={() => setMaterial(o.value)}
+                        className={`rounded-full px-3 py-1 text-xs border transition-colors
+                          ${material === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                      >
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
 
             <div>
               <label className="block text-sm font-medium mb-2">Additional notes <span className="text-muted-foreground font-normal">(optional)</span></label>
