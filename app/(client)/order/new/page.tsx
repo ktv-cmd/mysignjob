@@ -430,6 +430,23 @@ export default function NewOrderPage() {
             <p className="text-muted-foreground mt-1">See how your sign could look on your building.</p>
           </div>
 
+          {sizeResult && (
+            <div className="flex items-center justify-between border border-border rounded-xl px-4 py-3 bg-muted/30">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">📐</span>
+                <div>
+                  <p className="font-semibold leading-tight">
+                    {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
+                  </p>
+                  <p className="text-xs text-muted-foreground leading-tight">
+                    Estimated sign size · {sizeResult.widthInches}″ W × {sizeResult.heightInches}″ H
+                  </p>
+                </div>
+              </div>
+              <ConfidenceBadge confidence={sizeResult.confidence} />
+            </div>
+          )}
+
           {generating && (
             <div className="border border-border rounded-xl p-12 text-center space-y-3">
               <div className="text-4xl animate-pulse">🎨</div>
