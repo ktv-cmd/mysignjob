@@ -1,0 +1,17 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# sharp's native module loads libvips via a runtime path that static dependency
+# tracing (@vercel/nft) cannot follow, so the Netlify function bundle omits the
+# platform .so files. Force-include all @img platform packages — on the Linux
+# builder only the linux-x64 binaries are installed, which is exactly what the
+# Lambda runtime needs.
+[functions]
+  included_files = ["node_modules/@img/**"]
+
+[functions."___netlify-server-handler"]
+  included_files = ["node_modules/@img/**"]
