@@ -147,9 +147,15 @@ export default async function OrderPage({
           )}
           {spec.sign_type !== "awning" && spec.material && <Row label="Material" value={spec.material} />}
           <Row label="Illumination" value={ILLUMINATION_LABELS[spec.illumination] ?? spec.illumination} />
-          {(spec.width_inches || spec.height_inches) && (
+          {spec.is_corner && spec.front_width_inches && spec.side_width_inches ? (
+            <>
+              <Row label="Front Face" value={`${spec.front_width_inches}″ W × ${spec.height_inches}″ H`} />
+              <Row label="Side Face" value={`${spec.side_width_inches}″ W × ${spec.height_inches}″ H`} />
+              <Row label="Total Developed" value={`${spec.width_inches}″ developed × ${spec.height_inches}″ H`} />
+            </>
+          ) : (spec.width_inches || spec.height_inches) ? (
             <Row label="Estimated Size" value={`${spec.width_inches ?? "?"}″ W × ${spec.height_inches ?? "?"}″ H`} />
-          )}
+          ) : null}
         </dl>
         {spec.custom_notes && (
           <div>

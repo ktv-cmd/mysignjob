@@ -9,8 +9,8 @@ export async function POST(req: NextRequest) {
       quad: { x: number; y: number }[]
     }
 
-    if (!imageDataUrl || !quad || quad.length !== 4)
-      return NextResponse.json({ error: "imageDataUrl and 4-point quad required" }, { status: 400 })
+    if (!imageDataUrl || !quad || (quad.length !== 4 && quad.length !== 6))
+      return NextResponse.json({ error: "imageDataUrl and 4- or 6-point quad required" }, { status: 400 })
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 })
@@ -18,23 +18,103 @@ export async function POST(req: NextRequest) {
     const base64 = imageDataUrl.split(",")[1]
     if (!base64) return NextResponse.json({ error: "Invalid image data URL" }, { status: 400 })
 
-    // Convert quad to bounding box description for Gemini
+    const isCorner = quad.length === 6
+
+    const { GoogleGenAI } = await import("@google/genai")
+    const ai = new GoogleGenAI({ apiKey })
+
+    if (isCorner) {
+      // 6-point layout: [TL(0), TM(1), TR(2), BR(3), BM(4), BL(5)]
+      // Front face: TL, TM, BM, BL
+      // Side face:  TM, TR, BR, BM
+      const [tl, tm, tr, br, bm, bl] = quad
+
+      const frontDesc =
+        `FRONT FACE — corners at: ` +
+        `top-left (${(tl.x*100).toFixed(0)}%, ${(tl.y*100).toFixed(0)}%), ` +
+        `top-right/corner-fold (${(tm.x*100).toFixed(0)}%, ${(tm.y*100).toFixed(0)}%), ` +
+        `bottom-right/corner-fold (${(bm.x*100).toFixed(0)}%, ${(bm.y*100).toFixed(0)}%), ` +
+        `bottom-left (${(bl.x*100).toFixed(0)}%, ${(bl.y*100).toFixed(0)}%).`
+
+      const sideDesc =
+        `SIDE FACE — corners at: ` +
+        `top-left/corner-fold (${(tm.x*100).toFixed(0)}%, ${(tm.y*100).toFixed(0)}%), ` +
+        `top-right (${(tr.x*100).toFixed(0)}%, ${(tr.y*100).toFixed(0)}%), ` +
+        `bottom-right (${(br.x*100).toFixed(0)}%, ${(br.y*100).toFixed(0)}%), ` +
+        `bottom-left/corner-fold (${(bm.x*100).toFixed(0)}%, ${(bm.y*100).toFixed(0)}%).`
+
+      const response = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: [{
+          role: "user",
+          parts: [
+            { inlineData: { mimeType: "image/jpeg", data: base64 } },
+            {
+              text: `You are estimating the real-world dimensions of a corner storefront sign that wraps around a building edge, spanning TWO wall faces.
+
+The sign covers two faces separated by the building's vertical corner:
+${frontDesc}
+${sideDesc}
+
+Work through these steps:
+1. Find scale references (priority: door 36"×80", brick course 3.125" tall, CMU block 16"×8", window 36–48" wide, person ~66" tall).
+2. Calculate pixels-per-inch from the best reference.
+3. For each face independently, measure the face width and height in pixels then convert to inches. Note that the side face may be foreshortened by perspective — correct for this.
+4. The height should be the same for both faces (it's one continuous sign band).
+5. Cross-check: total storefront signs are typically 10–30 feet wide developed, 1–4 feet tall.
+
+Return ONLY a raw JSON object — no markdown, no extra text:
+{
+  "frontWidthInches": <number>,
+  "sideWidthInches": <number>,
+  "heightInches": <number>,
+  "confidence": <"high"|"medium"|"low">,
+  "referencesUsed": ["door", "brick", etc],
+  "angleWarning": <true if severe foreshortening makes estimation unreliable>,
+  "reasoning": "<one sentence>"
+}`,
+            },
+          ],
+        }],
+        config: { responseMimeType: "application/json", temperature: 0 },
+      })
+
+      const raw = JSON.parse(response.text ?? "{}")
+
+      const frontWidthInches = Math.round(raw.frontWidthInches ?? 0)
+      const sideWidthInches = Math.round(raw.sideWidthInches ?? 0)
+      const heightInches = Math.round(raw.heightInches ?? 0)
+
+      if (frontWidthInches <= 0 || heightInches <= 0)
+        return NextResponse.json({ error: "Could not estimate dimensions from this photo." }, { status: 422 })
+
+      return NextResponse.json({
+        widthInches: frontWidthInches + sideWidthInches,
+        heightInches,
+        frontWidthInches,
+        sideWidthInches,
+        confidence: raw.confidence ?? "low",
+        referencesUsed: raw.referencesUsed ?? [],
+        angleWarning: Boolean(raw.angleWarning),
+        reasoning: raw.reasoning ?? "",
+        isCorner: true,
+      })
+    }
+
+    // ── Flat 4-point mode ──────────────────────────────────────────────────────
     const xs = quad.map(p => p.x)
     const ys = quad.map(p => p.y)
     const cx = xs.reduce((a, b) => a + b, 0) / 4
     const cy = ys.reduce((a, b) => a + b, 0) / 4
-    const wFrac = (Math.max(...xs) - Math.min(...xs))
-    const hFrac = (Math.max(...ys) - Math.min(...ys))
+    const wFrac = Math.max(...xs) - Math.min(...xs)
+    const hFrac = Math.max(...ys) - Math.min(...ys)
 
     const regionDesc =
-      `The sign area is the region centered at approximately (${(cx * 100).toFixed(0)}%, ${(cy * 100).toFixed(0)}%) ` +
+      `The sign area is centered at approximately (${(cx * 100).toFixed(0)}%, ${(cy * 100).toFixed(0)}%) ` +
       `of the image, spanning about ${(wFrac * 100).toFixed(0)}% of the image width ` +
       `and ${(hFrac * 100).toFixed(0)}% of the image height. ` +
-      `The four corners of the sign area are at: ` +
+      `The four corners are at: ` +
       quad.map((p, i) => `${["top-left","top-right","bottom-right","bottom-left"][i]} (${(p.x*100).toFixed(0)}%, ${(p.y*100).toFixed(0)}%)`).join(", ") + "."
-
-    const { GoogleGenAI } = await import("@google/genai")
-    const ai = new GoogleGenAI({ apiKey })
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
@@ -90,6 +170,7 @@ Return ONLY a raw JSON object:
       referencesUsed: raw.referencesUsed ?? [],
       angleWarning: Boolean(raw.angleWarning),
       reasoning: raw.reasoning ?? "",
+      isCorner: false,
     })
   } catch (err) {
     console.error("[estimate-size]", err)

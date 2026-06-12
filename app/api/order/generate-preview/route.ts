@@ -38,8 +38,8 @@ One photorealistic 16:9 render with the sign physically integrated into the buil
 
 type SignType = "flat_cut" | "channel_letters" | "cabinet" | "blade" | "window_vinyl" | "monument" | "pylon" | "awning" | "other"
 
-// Sign types that support AI preview in v1
-const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl", "awning"]
+// All sign types support AI preview
+const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl", "monument", "pylon", "awning", "other"]
 
 function buildSignPrompt(params: {
   businessName: string
@@ -48,8 +48,14 @@ function buildSignPrompt(params: {
   illumination: string
   awningFrame?: string
   fabricName?: string
+  isCorner?: boolean
+  foldXPct?: number // normalized 0–100, horizontal position of the building corner fold
 }) {
-  const { businessName, signType, primaryColor, illumination, awningFrame, fabricName } = params
+  const { businessName, signType, primaryColor, illumination, awningFrame, fabricName, isCorner, foldXPct } = params
+
+  const cornerClause = isCorner && foldXPct != null
+    ? ` This is a WRAPAROUND CORNER SIGN that bends around the building's vertical corner edge at approximately ${foldXPct.toFixed(0)}% across the golden zone. The sign must follow the building corner: the front face covers the left portion and the side face (angled away) covers the right portion, with the business name readable on both faces. Each face catches light differently due to the angle.`
+    : ""
 
   const lightDesc: Record<string, string> = {
     none: "no artificial illumination — natural daylight shadows only",
@@ -60,33 +66,41 @@ function buildSignPrompt(params: {
     digital: "digital LED display",
   }
 
+  // Awning-specific lighting descriptions (different semantics from sign lighting)
+  const awningLightDesc: Record<string, string> = {
+    none: "natural daylight only, no artificial lighting on the awning",
+    internal_led: "the awning fabric is internally backlit — LED strips are mounted inside the frame, making the translucent fabric glow warmly from within at night",
+  }
+
   // Awning-specific prompt with frame shape and Sunbrella fabric detail
   if (signType === "awning") {
     const framePhrase = awningFrame ?? "classic slope shed awning"
     const fabricDesc = fabricName ? `in ${fabricName} Sunbrella® acrylic fabric` : `in a solid commercial-grade awning fabric (color: ${primaryColor})`
+    const awningLight = awningLightDesc[illumination] ?? awningLightDesc["none"]
     return [
       `Generate a photorealistic architectural photo of the storefront.`,
       `Inside the golden highlighted area, install a professional fabric storefront awning`,
       `with a ${framePhrase} profile, ${fabricDesc}.`,
       `The business name "${businessName}" must be printed in clean white lettering on the front valence of the awning.`,
       `The awning frame is powder-coated metal; the fabric drapes naturally with correct tension and shadow.`,
-      `Lighting: ${lightDesc[illumination] ?? "natural daylight"}.`,
+      `Lighting: ${awningLight}.`,
       `The awning must be physically mounted to the building fascia — no floating.`,
       `Completely replace the golden highlighted area with this awning,`,
       `restoring the original wall texture in any exposed areas around it.`,
+      cornerClause,
     ].join(" ")
   }
 
   const signDesc: Record<SignType, string> = {
-    flat_cut: "flat-cut dimensional letters",
-    channel_letters: "3D channel letter sign",
-    cabinet: "illuminated cabinet lightbox sign",
-    blade: "blade sign perpendicular to the facade",
-    window_vinyl: "vinyl lettering applied directly to the window glass",
-    monument: "monument sign",
-    pylon: "pylon sign",
+    flat_cut: "flat-cut dimensional letters mounted to the facade",
+    channel_letters: "3D illuminated channel letter sign",
+    cabinet: "illuminated lightbox cabinet sign",
+    blade: "blade sign mounted perpendicular to the facade",
+    window_vinyl: "vinyl graphic lettering applied to the window glass",
+    monument: "ground-mounted monument sign in front of the building",
+    pylon: "tall freestanding pylon pole sign visible from the street",
     awning: "fabric awning sign",
-    other: "dimensional sign",
+    other: "custom dimensional sign",
   }
 
   return [
@@ -98,6 +112,7 @@ function buildSignPrompt(params: {
     `The sign must be physically mounted to the wall — do not let it float.`,
     `Completely replace the golden highlighted area with this new signage,`,
     `restoring the original wall texture in any exposed areas around the sign.`,
+    cornerClause,
   ].join(" ")
 }
 
@@ -116,8 +131,12 @@ export async function POST(req: NextRequest) {
 
     const { imageDataUrl, quad, signType, businessName, primaryColor, illumination, awningFrame, fabricName } = body
 
-    if (!imageDataUrl || !quad || quad.length !== 4)
-      return NextResponse.json({ error: "imageDataUrl and 4-point quad required" }, { status: 400 })
+    if (!imageDataUrl || !quad || (quad.length !== 4 && quad.length !== 6))
+      return NextResponse.json({ error: "imageDataUrl and 4- or 6-point quad required" }, { status: 400 })
+
+    // For 6-point corner quads, derive fold x position (average of TM/BM normalized x * 100)
+    const isCorner = quad.length === 6
+    const foldXPct = isCorner ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined
 
     if (!PREVIEW_SUPPORTED.includes(signType)) {
       return NextResponse.json({
@@ -164,7 +183,7 @@ export async function POST(req: NextRequest) {
     const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = await import("@google/genai")
     const ai = new GoogleGenAI({ apiKey })
 
-    const prompt = buildSignPrompt({ businessName, signType, primaryColor, illumination, awningFrame, fabricName })
+    const prompt = buildSignPrompt({ businessName, signType, primaryColor, illumination, awningFrame, fabricName, isCorner, foldXPct })
 
     type Part = { text: string } | { inlineData: { mimeType: string; data: string } }
     const parts: Part[] = [

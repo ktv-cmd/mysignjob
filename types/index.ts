@@ -67,11 +67,12 @@ export interface SunbrellaFabric {
   name: string   // e.g. "Pacific Blue"
   code: string   // e.g. "4601"
   hex: string    // approximate swatch color
+  common?: boolean // true = shown in the default 12-color grid
 }
 
 export interface SignSpec {
   sign_type: SignType
-  width_inches: number
+  width_inches: number   // total developed width (= front + side for corner signs)
   height_inches: number
   width_confidence: "high" | "medium" | "low"
   business_name: string
@@ -83,13 +84,12 @@ export interface SignSpec {
   // AI estimation metadata
   estimation_references: string[] // e.g. ["door", "brick"]
   estimation_angle_warning: boolean
-  // Selection quad (normalized 0–1)
-  selection_quad: [
-    { x: number; y: number },
-    { x: number; y: number },
-    { x: number; y: number },
-    { x: number; y: number },
-  ]
+  // Selection quad (normalized 0–1) — 4 points [TL,TR,BR,BL] for flat, 6 points [TL,TM,TR,BR,BM,BL] for corner
+  selection_quad: { x: number; y: number }[]
+  // Corner / wraparound sign fields
+  is_corner?: boolean
+  front_width_inches?: number  // face 1 width (corner signs only)
+  side_width_inches?: number   // face 2 width (corner signs only)
   // Awning-specific (only when sign_type === "awning")
   awning_frame_style?: AwningFrameStyle
   awning_fabric?: SunbrellaFabric

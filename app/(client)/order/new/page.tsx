@@ -22,22 +22,24 @@ const STEP_LABELS: Record<Step, string> = {
 interface SizeResult {
   widthInches: number
   heightInches: number
+  frontWidthInches?: number
+  sideWidthInches?: number
+  isCorner?: boolean
   confidence: "high" | "medium" | "low"
   referencesUsed: string[]
   angleWarning: boolean
   reasoning: string
 }
 
-const SIGN_TYPES: { value: SignType; label: string; preview: boolean }[] = [
-  { value: "channel_letters", label: "Channel Letters", preview: true },
-  { value: "cabinet",         label: "Cabinet / Lightbox", preview: true },
-  { value: "flat_cut",        label: "Flat Cut Letters", preview: true },
-  { value: "blade",           label: "Blade Sign", preview: true },
-  { value: "window_vinyl",    label: "Window Vinyl", preview: true },
-  { value: "monument",        label: "Monument Sign", preview: false },
-  { value: "pylon",           label: "Pylon Sign", preview: false },
-  { value: "awning",          label: "Awning", preview: false },
-  { value: "other",           label: "Other", preview: false },
+const SIGN_TYPES: { value: SignType; label: string }[] = [
+  { value: "channel_letters", label: "3D Channel Letters" },
+  { value: "cabinet",         label: "Lightbox / Cabinet" },
+  { value: "flat_cut",        label: "Flat Cut Letters" },
+  { value: "blade",           label: "Blade Sign" },
+  { value: "window_vinyl",    label: "Window Graphics" },
+  { value: "monument",        label: "Monument Sign" },
+  { value: "pylon",           label: "Pylon / Pole Sign" },
+  { value: "awning",          label: "Fabric Awning" },
 ]
 
 const ILLUMINATION_OPTS: { value: IlluminationType; label: string }[] = [
@@ -45,6 +47,11 @@ const ILLUMINATION_OPTS: { value: IlluminationType; label: string }[] = [
   { value: "internal_led", label: "Front-lit LED (glowing faces)" },
   { value: "halo",         label: "Back-lit halo glow" },
   { value: "external",     label: "External floodlight" },
+]
+
+const AWNING_LIGHTING: { value: IlluminationType; label: string; desc: string }[] = [
+  { value: "none",         label: "No Lighting",             desc: "Daytime only, no illumination" },
+  { value: "internal_led", label: "Backlit (interior light)", desc: "Fabric glows from inside the frame at night" },
 ]
 
 const MATERIAL_OPTS: { value: SignMaterial; label: string }[] = [
@@ -57,50 +64,143 @@ const MATERIAL_OPTS: { value: SignMaterial; label: string }[] = [
 
 // ── Awning frame styles (industry standard — most common is "standard" shed slope)
 const AWNING_FRAMES: { value: AwningFrameStyle; label: string; desc: string; aiPhrase: string }[] = [
-  { value: "standard_valence", label: "Standard w/ Valence", desc: "Sloped + front valence drop", aiPhrase: "traditional slope awning with a front valence drop" },
-  { value: "standard",         label: "Standard",            desc: "Classic slope — most common", aiPhrase: "classic slope shed awning" },
-  { value: "arch",             label: "Arch",                desc: "Curved top, flat base",       aiPhrase: "arched curved-top awning" },
-  { value: "bullnose",         label: "Bullnose",            desc: "Rounded convex front",        aiPhrase: "bullnose convex-front rounded awning" },
-  { value: "dome",             label: "Dome",                desc: "Full semicircle dome",        aiPhrase: "full dome semicircular awning" },
-  { value: "circular",         label: "Circular",            desc: "Gentle half-barrel curve",    aiPhrase: "circular barrel-curved awning" },
-  { value: "gable",            label: "Gable",               desc: "Peaked ridge roof shape",     aiPhrase: "gable peaked-ridge awning" },
-  { value: "half_round",       label: "Half Round",          desc: "Arched with swept sides",     aiPhrase: "half-round arch awning with swept sides" },
-  { value: "quarter_round",    label: "Quarter Round",       desc: "Quarter-circle from wall",    aiPhrase: "quarter-round curved awning projecting from wall" },
-  { value: "concave",          label: "Concave",             desc: "Inward curved, dramatic flair",aiPhrase: "concave inward-curved awning" },
-  { value: "waterfall",        label: "Waterfall",           desc: "Sweeping cascade curve",      aiPhrase: "waterfall cascading curved awning" },
-  { value: "box",              label: "Box",                 desc: "Flat top, boxy profile",      aiPhrase: "flat-top box awning with straight returns" },
+  { value: "standard_valence", label: "Standard w/ Valence", desc: "Sloped + front valence drop",     aiPhrase: "traditional slope awning with a front valence drop" },
+  { value: "standard",         label: "Standard",            desc: "Classic slope — most common",      aiPhrase: "classic slope shed awning" },
+  { value: "arch",             label: "Arch",                desc: "Curved top, flat base",            aiPhrase: "arched curved-top awning" },
+  { value: "bullnose",         label: "Bullnose",            desc: "Rounded convex front edge",        aiPhrase: "bullnose convex-front rounded awning" },
+  { value: "dome",             label: "Dome",                desc: "Full semicircle dome",             aiPhrase: "full dome semicircular awning" },
+  { value: "circular",         label: "Circular",            desc: "Gentle half-barrel curve",         aiPhrase: "circular barrel-curved awning" },
+  { value: "gable",            label: "Gable",               desc: "Peaked ridge roof shape",          aiPhrase: "gable peaked-ridge awning" },
+  { value: "half_round",       label: "Half Round",          desc: "Arched with swept sides",          aiPhrase: "half-round arch awning with swept sides" },
+  { value: "quarter_round",    label: "Quarter Round",       desc: "Quarter-circle from wall",         aiPhrase: "quarter-round curved awning projecting from wall" },
+  { value: "concave",          label: "Concave",             desc: "Inward curved, dramatic flair",    aiPhrase: "concave inward-curved awning" },
+  { value: "waterfall",        label: "Waterfall",           desc: "Sweeping cascade curve",           aiPhrase: "waterfall cascading curved awning" },
+  { value: "box",              label: "Box",                 desc: "Flat top, boxy profile",           aiPhrase: "flat-top box awning with straight returns" },
 ]
 
 // ── Sunbrella Awning/Marine Grade solid fabric palette (10-yr warranty, weatherproof)
 // Codes are official Sunbrella SKU prefixes; hex values are visual approximations for swatches.
+// common: true = shown in the default collapsed view (12 most popular storefront choices)
 const SUNBRELLA_COLORS: SunbrellaFabric[] = [
-  { name: "Natural",        code: "4604", hex: "#F2EFE4" },
-  { name: "White",          code: "4634", hex: "#FAFAFA" },
-  { name: "Parchment",      code: "6083", hex: "#E5DCC3" },
-  { name: "Beige",          code: "4620", hex: "#D9CDB3" },
-  { name: "Toast",          code: "4628", hex: "#8B6B56" },
-  { name: "Cocoa",          code: "6076", hex: "#5C4232" },
-  { name: "Walnut Brown",   code: "4618", hex: "#5C4B3B" },
-  { name: "Terracotta",     code: "4622", hex: "#A84E34" },
-  { name: "Orange",         code: "6009", hex: "#D2622A" },
-  { name: "Sunflower",      code: "4602", hex: "#E0A92B" },
-  { name: "Erin Green",     code: "6000", hex: "#2E6B3E" },
-  { name: "Basil",          code: "4688", hex: "#3E5641" },
-  { name: "Forest Green",   code: "4637", hex: "#1F3D2B" },
-  { name: "Sky Blue",       code: "6024", hex: "#5B8FB9" },
-  { name: "Pacific Blue",   code: "4601", hex: "#1C3F6E" },
-  { name: "Royal Blue",     code: "4617", hex: "#2E4A7A" },
-  { name: "Sapphire Blue",  code: "6041", hex: "#1B4F8A" },
-  { name: "Navy",           code: "6026", hex: "#1E2A44" },
-  { name: "Burgundy",       code: "4631", hex: "#5C1A2B" },
-  { name: "Black Cherry",   code: "6040", hex: "#4A1C28" },
-  { name: "Silver",         code: "4651", hex: "#B8BCC0" },
-  { name: "Cadet Grey",     code: "6030", hex: "#8A9499" },
-  { name: "Slate",          code: "4684", hex: "#4D5358" },
-  { name: "Black",          code: "4608", hex: "#1C1C1C" },
+  // Neutrals
+  { name: "Natural",        code: "4604", hex: "#F2EFE4", common: true  },
+  { name: "White",          code: "4634", hex: "#FAFAFA", common: true  },
+  { name: "Linen",          code: "6037", hex: "#EDE4D0"                },
+  { name: "Parchment",      code: "6083", hex: "#E5DCC3"                },
+  { name: "Beige",          code: "4620", hex: "#D9CDB3", common: true  },
+  { name: "Sand",           code: "4642", hex: "#C9B99A"                },
+  { name: "Antique Beige",  code: "5402", hex: "#C4B08A"                },
+  // Browns
+  { name: "Toast",          code: "4628", hex: "#8B6B56", common: true  },
+  { name: "Bark",           code: "5461", hex: "#7A5C46"                },
+  { name: "Teak",           code: "5489", hex: "#6B4F37"                },
+  { name: "Cocoa",          code: "6076", hex: "#5C4232"                },
+  { name: "Walnut Brown",   code: "4618", hex: "#5C4B3B"                },
+  { name: "Char Brown",     code: "7786", hex: "#3D2E26"                },
+  // Reds / Pinks
+  { name: "Henna",          code: "5433", hex: "#8B3A2A"                },
+  { name: "Terracotta",     code: "4622", hex: "#A84E34", common: true  },
+  { name: "Brick",          code: "5409", hex: "#9C3628"                },
+  { name: "Jockey Red",     code: "4023", hex: "#C0201E"                },
+  { name: "Burgundy",       code: "4631", hex: "#5C1A2B", common: true  },
+  { name: "Black Cherry",   code: "6040", hex: "#4A1C28"                },
+  // Oranges / Yellows
+  { name: "Paprika",        code: "4626", hex: "#B54520"                },
+  { name: "Orange",         code: "6009", hex: "#D2622A"                },
+  { name: "Sunflower",      code: "4602", hex: "#E0A92B"                },
+  { name: "Canary",         code: "5454", hex: "#F2CC3A"                },
+  // Greens
+  { name: "Meadow",         code: "5432", hex: "#4E7A4A"                },
+  { name: "Erin Green",     code: "6000", hex: "#2E6B3E", common: true  },
+  { name: "Basil",          code: "4688", hex: "#3E5641"                },
+  { name: "Palm",           code: "5446", hex: "#2D5038"                },
+  { name: "Forest Green",   code: "4637", hex: "#1F3D2B", common: true  },
+  { name: "Hunter Green",   code: "4053", hex: "#1A3320"                },
+  // Blues
+  { name: "Sky Blue",       code: "6024", hex: "#5B8FB9"                },
+  { name: "Cobalt",         code: "5439", hex: "#3B6EA5"                },
+  { name: "Pacific Blue",   code: "4601", hex: "#1C3F6E", common: true  },
+  { name: "Royal Blue",     code: "4617", hex: "#2E4A7A"                },
+  { name: "Sapphire Blue",  code: "6041", hex: "#1B4F8A"                },
+  { name: "Marine Blue",    code: "4021", hex: "#1A3A5C"                },
+  { name: "Navy",           code: "6026", hex: "#1E2A44", common: true  },
+  // Greys / Black
+  { name: "Silver",         code: "4651", hex: "#B8BCC0", common: true  },
+  { name: "Cadet Grey",     code: "6030", hex: "#8A9499"                },
+  { name: "Slate",          code: "4684", hex: "#4D5358"                },
+  { name: "Charcoal",       code: "4648", hex: "#383E42"                },
+  { name: "Black",          code: "4608", hex: "#1C1C1C", common: true  },
 ]
 
 const DEFAULT_AWNING_FABRIC = SUNBRELLA_COLORS.find(c => c.code === "4601")! // Pacific Blue
+
+// ── SVG profile icons for each awning frame style (side-view silhouettes) ──────
+function AwningFrameIcon({ style, active }: { style: AwningFrameStyle; active: boolean }) {
+  const fill = active ? "currentColor" : "currentColor"
+  const opacity = active ? 0.85 : 0.35
+
+  const paths: Record<AwningFrameStyle, React.ReactNode> = {
+    // Classic shed slope — slants from high-left to lower-right
+    standard: (
+      <path d="M2,8 L56,24 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Shed slope + short valence hanging at the front edge
+    standard_valence: (
+      <>
+        <path d="M2,8 L56,22 L56,34 L2,34 Z" fill={fill} fillOpacity={opacity} />
+        <rect x="48" y="34" width="8" height="8" fill={fill} fillOpacity={opacity} />
+      </>
+    ),
+    // Gentle convex arc on top
+    arch: (
+      <path d="M2,10 Q29,0 56,18 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Convex front edge bows out
+    bullnose: (
+      <path d="M2,10 L40,10 Q62,10 54,32 L2,32 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Full dome semicircle
+    dome: (
+      <path d="M2,36 A27,27 0 0 1 56,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Shallower barrel curve
+    circular: (
+      <path d="M2,34 Q29,10 56,34 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Peaked A-frame / gable from front
+    gable: (
+      <path d="M2,36 L29,8 L56,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Semicircular arch with swept sides
+    half_round: (
+      <path d="M2,36 Q2,10 29,10 Q56,10 56,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Quarter-circle arc from wall (starts vertical, ends horizontal)
+    quarter_round: (
+      <path d="M2,8 A48,48 0 0 1 50,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Concave — inward curve on top surface
+    concave: (
+      <path d="M2,10 Q29,26 56,10 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Waterfall — S-curve cascade
+    waterfall: (
+      <path d="M2,10 C18,10 38,36 56,26 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+    // Flat-top rectangle / box
+    box: (
+      <path d="M2,10 L56,10 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
+    ),
+  }
+
+  return (
+    <svg viewBox="0 0 58 44" className="w-full h-10 mb-1" aria-hidden="true">
+      {/* Wall attachment line */}
+      <line x1="1" y1="2" x2="1" y2="42" stroke={fill} strokeOpacity={active ? 0.7 : 0.25} strokeWidth="2" strokeLinecap="round" />
+      {paths[style]}
+    </svg>
+  )
+}
 
 export default function NewOrderPage() {
   const router = useRouter()
@@ -129,8 +229,16 @@ export default function NewOrderPage() {
   // Awning-specific
   const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("standard")
   const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
+  const [showAllColors, setShowAllColors] = useState(false)
+  // Corner / wraparound sign
+  const [isCorner, setIsCorner] = useState(false)
 
   const stepIdx = STEPS.indexOf(step)
+
+  // Colors shown: always include the 12 common + the currently selected color (even if not common)
+  const visibleColors = showAllColors
+    ? SUNBRELLA_COLORS
+    : SUNBRELLA_COLORS.filter(c => c.common || c.code === awningFabric.code)
 
   async function runEstimate(q: QuadPoint[]) {
     if (!photoDataUrl) return
@@ -202,12 +310,17 @@ export default function NewOrderPage() {
       business_name: businessName,
       primary_color: signType === "awning" ? awningFabric.hex : primaryColor,
       secondary_color: signType === "awning" ? null : (secondaryColor || null),
-      material: signType === "awning" ? "vinyl" : material, // fabric replaces material for awnings
+      material: signType === "awning" ? "vinyl" : material,
       illumination,
       custom_notes: notes || null,
       estimation_references: sizeResult.referencesUsed,
       estimation_angle_warning: sizeResult.angleWarning,
       selection_quad: quad as SignSpec["selection_quad"],
+      ...(isCorner && {
+        is_corner: true,
+        front_width_inches: sizeResult.frontWidthInches,
+        side_width_inches: sizeResult.sideWidthInches,
+      }),
       ...(signType === "awning" && {
         awning_frame_style: awningFrame,
         awning_fabric: awningFabric,
@@ -276,15 +389,33 @@ export default function NewOrderPage() {
             <h1 className="text-2xl font-bold">Mark where your sign will go</h1>
             <p className="text-muted-foreground mt-1">Drag the corners to outline the sign area precisely.</p>
           </div>
+          {/* Corner toggle */}
+          <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+            <input
+              type="checkbox"
+              checked={isCorner}
+              onChange={e => {
+                setIsCorner(e.target.checked)
+                setQuad(null)
+                setSizeResult(null)
+              }}
+              className="w-4 h-4 accent-accent"
+            />
+            <div>
+              <p className="text-sm font-medium leading-tight">Corner sign (wraps two walls)</p>
+              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Use this if your sign bends around the building corner, covering both the front and side face.</p>
+            </div>
+          </label>
+
           <QuadSelector
             imageDataUrl={photoDataUrl}
+            corner={isCorner}
             onChange={(q) => {
               setQuad(q)
               setSizeResult(null)
             }}
           />
 
-          {/* Run size estimate */}
           {quad && !sizeResult && !estimating && (
             <button
               onClick={() => runEstimate(quad)}
@@ -308,9 +439,23 @@ export default function NewOrderPage() {
             <div className="border border-border rounded-xl p-4 space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="font-semibold text-lg">
-                    {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
-                  </p>
+                  {sizeResult.isCorner && sizeResult.frontWidthInches && sizeResult.sideWidthInches ? (
+                    <>
+                      <p className="font-semibold text-lg leading-tight">
+                        Front {formatDimensions(sizeResult.frontWidthInches, sizeResult.heightInches)}
+                      </p>
+                      <p className="font-semibold text-lg leading-tight">
+                        Side {formatDimensions(sizeResult.sideWidthInches, sizeResult.heightInches)}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Total developed: {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
+                      </p>
+                    </>
+                  ) : (
+                    <p className="font-semibold text-lg">
+                      {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
+                    </p>
+                  )}
                   <p className="text-xs text-muted-foreground">
                     {sizeResult.referencesUsed.length > 0
                       ? `Based on: ${sizeResult.referencesUsed.join(", ")}`
@@ -375,11 +520,10 @@ export default function NewOrderPage() {
                     key={t.value}
                     type="button"
                     onClick={() => setSignType(t.value)}
-                    className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
-                      ${signType === t.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                    className={`text-left rounded-lg border px-3 py-2 text-xs font-medium transition-colors
+                      ${signType === t.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}
                   >
                     {t.label}
-                    {!t.preview && <span className="block text-[10px] text-muted-foreground">No AI preview</span>}
                   </button>
                 ))}
               </div>
@@ -388,34 +532,42 @@ export default function NewOrderPage() {
             {/* ── Awning-specific options ── */}
             {signType === "awning" ? (
               <>
+                {/* Frame style with SVG icons */}
                 <div>
                   <label className="block text-sm font-medium mb-1">Frame style</label>
-                  <p className="text-xs text-muted-foreground mb-2">Choose the awning profile shape. <span className="font-medium">Standard</span> is the most common for storefronts.</p>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Choose the awning profile shape. <span className="font-medium">Standard</span> is the most common for storefronts.
+                  </p>
                   <div className="grid grid-cols-3 gap-2">
-                    {AWNING_FRAMES.map(f => (
-                      <button
-                        key={f.value}
-                        type="button"
-                        onClick={() => setAwningFrame(f.value)}
-                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
-                          ${awningFrame === f.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                      >
-                        <span className="block font-medium">{f.label}</span>
-                        <span className="block text-[10px] text-muted-foreground mt-0.5">{f.desc}</span>
-                      </button>
-                    ))}
+                    {AWNING_FRAMES.map(f => {
+                      const active = awningFrame === f.value
+                      return (
+                        <button
+                          key={f.value}
+                          type="button"
+                          onClick={() => setAwningFrame(f.value)}
+                          className={`rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors text-left
+                            ${active ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}
+                        >
+                          <AwningFrameIcon style={f.value} active={active} />
+                          <span className={`block font-medium leading-tight ${active ? "text-accent" : ""}`}>{f.label}</span>
+                          <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{f.desc}</span>
+                        </button>
+                      )
+                    })}
                   </div>
                 </div>
 
+                {/* Sunbrella fabric color with progressive disclosure */}
                 <div>
                   <label className="block text-sm font-medium mb-1">Sunbrella® fabric color</label>
                   <p className="text-xs text-muted-foreground mb-3">
-                    Commercial-grade awning fabric — 10-yr warranty, UV & weather resistant.
+                    Commercial-grade awning fabric — 10-yr warranty, UV &amp; weather resistant.
                     Selected: <span className="font-medium">{awningFabric.name}</span>
                     <span className="text-muted-foreground"> · #{awningFabric.code}</span>
                   </p>
                   <div className="grid grid-cols-6 gap-2">
-                    {SUNBRELLA_COLORS.map(c => (
+                    {visibleColors.map(c => (
                       <button
                         key={c.code}
                         type="button"
@@ -436,6 +588,19 @@ export default function NewOrderPage() {
                       </button>
                     ))}
                   </div>
+
+                  {/* Show all / show fewer toggle */}
+                  <button
+                    type="button"
+                    onClick={() => setShowAllColors(v => !v)}
+                    className="mt-3 text-xs text-accent font-medium hover:underline flex items-center gap-1"
+                  >
+                    {showAllColors
+                      ? `Show fewer ▴`
+                      : `Show all ${SUNBRELLA_COLORS.length} colors ▾`}
+                  </button>
+
+                  {/* Selected swatch summary */}
                   <div className="mt-2 flex items-center gap-2">
                     <div className="w-5 h-5 rounded border border-border flex-shrink-0" style={{ background: awningFabric.hex }} />
                     <span className="text-sm font-medium">{awningFabric.name}</span>
@@ -443,21 +608,20 @@ export default function NewOrderPage() {
                   </div>
                 </div>
 
+                {/* Awning illumination — 2 options only */}
                 <div>
-                  <label className="block text-sm font-medium mb-2">Illumination</label>
+                  <label className="block text-sm font-medium mb-2">Lighting</label>
                   <div className="grid grid-cols-2 gap-2">
-                    {[
-                      { value: "none" as IlluminationType, label: "No lighting (day only)" },
-                      { value: "external" as IlluminationType, label: "External floodlight" },
-                    ].map(o => (
+                    {AWNING_LIGHTING.map(o => (
                       <button
                         key={o.value}
                         type="button"
                         onClick={() => setIllumination(o.value)}
-                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
+                        className={`text-left rounded-lg border px-3 py-2.5 text-xs transition-colors
                           ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
                       >
-                        {o.label}
+                        <span className="block font-medium">{o.label}</span>
+                        <span className="block text-[10px] text-muted-foreground mt-0.5">{o.desc}</span>
                       </button>
                     ))}
                   </div>
@@ -577,12 +741,25 @@ export default function NewOrderPage() {
               <div className="flex items-center gap-2">
                 <span className="text-lg">📐</span>
                 <div>
-                  <p className="font-semibold leading-tight">
-                    {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
-                  </p>
-                  <p className="text-xs text-muted-foreground leading-tight">
-                    Estimated sign size · {sizeResult.widthInches}″ W × {sizeResult.heightInches}″ H
-                  </p>
+                  {sizeResult.isCorner && sizeResult.frontWidthInches && sizeResult.sideWidthInches ? (
+                    <>
+                      <p className="font-semibold leading-tight text-sm">
+                        Front {formatDimensions(sizeResult.frontWidthInches, sizeResult.heightInches)} · Side {formatDimensions(sizeResult.sideWidthInches, sizeResult.heightInches)}
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-tight">
+                        Corner sign · total developed {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-semibold leading-tight">
+                        {formatDimensions(sizeResult.widthInches, sizeResult.heightInches)}
+                      </p>
+                      <p className="text-xs text-muted-foreground leading-tight">
+                        Estimated sign size · {sizeResult.widthInches}″ W × {sizeResult.heightInches}″ H
+                      </p>
+                    </>
+                  )}
                 </div>
               </div>
               <ConfidenceBadge confidence={sizeResult.confidence} />
@@ -600,10 +777,9 @@ export default function NewOrderPage() {
           {!generating && previewSkipped && (
             <div className="border border-border rounded-xl p-8 text-center space-y-3">
               <div className="text-4xl">📋</div>
-              <p className="font-medium">No AI preview for this sign type</p>
+              <p className="font-medium">Preview not available</p>
               <p className="text-sm text-muted-foreground">
-                AI preview isn't available for {SIGN_TYPES.find(t => t.value === signType)?.label ?? signType} in this version.
-                Your order will still receive competitive quotes from sign companies.
+                We couldn't generate a preview for this order. Your order will still receive competitive quotes from sign companies.
               </p>
             </div>
           )}
@@ -668,11 +844,39 @@ export default function NewOrderPage() {
 
           <div className="border border-border rounded-xl divide-y divide-border">
             <Row label="Business name" value={businessName} />
-            <Row label="Sign type" value={SIGN_TYPES.find(t => t.value === signType)?.label ?? signType} />
-            <Row label="Estimated size" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
-            <Row label="Primary color" value={<span className="flex items-center gap-2"><span className="w-4 h-4 rounded border border-border inline-block" style={{ background: primaryColor }} />{primaryColor}</span>} />
-            <Row label="Illumination" value={ILLUMINATION_OPTS.find(o => o.value === illumination)?.label ?? illumination} />
-            <Row label="Material" value={MATERIAL_OPTS.find(o => o.value === material)?.label ?? material} />
+            <Row label="Sign type" value={
+              <span className="flex items-center gap-1.5">
+                {SIGN_TYPES.find(t => t.value === signType)?.label ?? signType}
+                {isCorner && <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">corner</span>}
+              </span>
+            } />
+            {sizeResult.isCorner && sizeResult.frontWidthInches && sizeResult.sideWidthInches ? (
+              <>
+                <Row label="Front face" value={formatDimensions(sizeResult.frontWidthInches, sizeResult.heightInches)} />
+                <Row label="Side face" value={formatDimensions(sizeResult.sideWidthInches, sizeResult.heightInches)} />
+                <Row label="Total developed" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
+              </>
+            ) : (
+              <Row label="Estimated size" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
+            )}
+            {signType === "awning" ? (
+              <>
+                <Row label="Frame style" value={AWNING_FRAMES.find(f => f.value === awningFrame)?.label ?? awningFrame} />
+                <Row label="Sunbrella® fabric" value={
+                  <span className="flex items-center gap-2">
+                    <span className="w-4 h-4 rounded border border-border inline-block flex-shrink-0" style={{ background: awningFabric.hex }} />
+                    {awningFabric.name} #{awningFabric.code}
+                  </span>
+                } />
+                <Row label="Lighting" value={AWNING_LIGHTING.find(o => o.value === illumination)?.label ?? illumination} />
+              </>
+            ) : (
+              <>
+                <Row label="Primary color" value={<span className="flex items-center gap-2"><span className="w-4 h-4 rounded border border-border inline-block" style={{ background: primaryColor }} />{primaryColor}</span>} />
+                <Row label="Illumination" value={ILLUMINATION_OPTS.find(o => o.value === illumination)?.label ?? illumination} />
+                <Row label="Material" value={MATERIAL_OPTS.find(o => o.value === material)?.label ?? material} />
+              </>
+            )}
             {notes && <Row label="Notes" value={notes} />}
             <Row label="AI preview" value={previewDataUrl ? "Included ✓" : previewSkipped ? "Not available for this type" : "Not generated"} />
           </div>
