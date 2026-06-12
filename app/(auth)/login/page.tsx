@@ -1,18 +1,18 @@
 "use client"
 
-import { useActionState } from "react"
+import { Suspense, useActionState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { signIn, type AuthState } from "@/app/actions/auth"
 import { AuthShell, Field, SubmitButton } from "@/components/auth/AuthUI"
 
-export default function LoginPage() {
+function LoginForm() {
   const [state, action, pending] = useActionState<AuthState, FormData>(signIn, null)
   const searchParams = useSearchParams()
   const next = searchParams.get("next") ?? ""
 
   return (
-    <AuthShell title="Welcome back" subtitle="Log in to your account">
+    <>
       <form action={action} className="space-y-4">
         {next && <input type="hidden" name="next" value={next} />}
         <Field label="Email" name="email" type="email" autoComplete="email" required />
@@ -26,6 +26,16 @@ export default function LoginPage() {
           Sign up
         </Link>
       </p>
+    </>
+  )
+}
+
+export default function LoginPage() {
+  return (
+    <AuthShell title="Welcome back" subtitle="Log in to your account">
+      <Suspense fallback={null}>
+        <LoginForm />
+      </Suspense>
     </AuthShell>
   )
 }
