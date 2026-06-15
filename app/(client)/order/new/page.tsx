@@ -12,6 +12,7 @@ import {
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
   type PanelColor, type AcrylicColor, type LightType, type ReturnGlow,
 } from "@/lib/sign-colors"
+import { buildSignPrompt, type SignPromptParams } from "@/lib/sign-prompt"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
 
@@ -432,6 +433,32 @@ export default function NewOrderPage() {
     ? ACRYLIC_COLORS
     : ACRYLIC_COLORS.filter(c => c.common || c.code === acrylicColor.code)
 
+  // Build the exact prompt params shared by the client (display) and server (generation)
+  function buildPromptParams(): SignPromptParams {
+    const isCornerQuad = !!quad && quad.length === 6
+    const foldXPct = isCornerQuad && quad ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined
+    return {
+      businessName,
+      signType,
+      brandMode,
+      hasLogo: !!logoDataUrl,
+      material,
+      primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
+      panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
+      panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : null,
+      acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent } : null,
+      lightType,
+      returnGlow,
+      awningFrame: signType === "awning" ? awningFrame : undefined,
+      fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+      illumination,
+      isCorner: isCornerQuad,
+      foldXPct,
+    }
+  }
+
+  const currentPrompt = buildSignPrompt(buildPromptParams())
+
   async function runEstimate(q: QuadPoint[]) {
     if (!photoDataUrl) return
     setEstimating(true)
@@ -466,10 +493,17 @@ export default function NewOrderPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageDataUrl: photoDataUrl, quad, signType, businessName, brandMode,
+          imageDataUrl: photoDataUrl, quad,
           logoDataUrl: logoDataUrl ?? undefined,
+          // material / color / lighting params (shared with the prompt preview)
+          signType, businessName, brandMode,
           primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
           illumination,
+          material,
+          panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
+          panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : undefined,
+          acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent } : undefined,
+          lightType, returnGlow,
           awningFrame: signType === "awning" ? awningFrame : undefined,
           fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
           count: 3,
@@ -1076,6 +1110,28 @@ export default function NewOrderPage() {
               />
             </div>
           </div>
+
+          {/* ── AI prompt preview (exactly what gets sent to the image model) ── */}
+          <details className="border border-border rounded-xl bg-muted/20 overflow-hidden group" open>
+            <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+              <span className="flex items-center gap-2">🤖 AI prompt preview</span>
+              <span className="text-xs text-muted-foreground group-open:hidden">show</span>
+              <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+            </summary>
+            <div className="px-4 pb-4 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                This is the exact instruction sent to the AI to render your sign. Adjust the options above and it updates live.
+              </p>
+              <pre className="text-xs whitespace-pre-wrap leading-relaxed bg-background border border-border rounded-lg p-3 font-mono text-foreground/90 max-h-56 overflow-auto">{currentPrompt}</pre>
+              <button
+                type="button"
+                onClick={() => navigator.clipboard?.writeText(currentPrompt)}
+                className="text-xs text-accent font-medium hover:underline"
+              >
+                Copy prompt
+              </button>
+            </div>
+          </details>
 
           <div className="flex gap-3">
             <button onClick={() => setStep("quad")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">

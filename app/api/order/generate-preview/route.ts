@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { buildSignPrompt, type PromptColor } from "@/lib/sign-prompt"
 
 export const maxDuration = 180
 
@@ -37,116 +38,6 @@ type SignType = "flat_cut" | "channel_letters" | "cabinet" | "blade" | "window_v
 type BrandMode = "text-only" | "logo-only" | "logo-and-text"
 
 const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl", "monument", "pylon", "awning", "other"]
-
-function buildSignPrompt(params: {
-  businessName: string
-  signType: SignType
-  primaryColor: string
-  illumination: string
-  brandMode: BrandMode
-  hasLogo: boolean
-  awningFrame?: string
-  fabricName?: string
-  isCorner?: boolean
-  foldXPct?: number
-}) {
-  const { businessName, signType, primaryColor, illumination, brandMode, hasLogo, awningFrame, fabricName, isCorner, foldXPct } = params
-
-  const cornerClause = isCorner && foldXPct != null
-    ? ` This is a WRAPAROUND CORNER SIGN that bends around the building's vertical corner edge at approximately ${foldXPct.toFixed(0)}% across the golden zone. The sign must follow the building corner: the front face covers the left portion and the side face (angled away) covers the right portion, with the business name readable on both faces. Each face catches light differently due to the angle.`
-    : ""
-
-  // What content goes on the sign
-  const contentDesc = brandMode === "logo-only"
-    ? `the logo from Image 2`
-    : brandMode === "logo-and-text"
-    ? `the logo from Image 2 alongside the text '${businessName}'`
-    : `the text '${businessName}'`
-
-  // Image slot description (appended when a logo is present)
-  const imageSlotDesc = hasLogo
-    ? brandMode === "logo-only"
-      ? `Image 1: storefront — gold/yellow shows where new signage goes. Image 2: supplied logo — use as the sign artwork, preserve its exact colors.`
-      : `Image 1: storefront — gold/yellow shows where new signage goes. Image 2: supplied logo — pair with the business name per the text instructions.`
-    : ""
-
-  // Color instruction
-  const colorDesc = brandMode === "logo-only"
-    ? "The colors must match exactly the logo provided in Image 2."
-    : brandMode === "logo-and-text" && hasLogo
-    ? `Letter/face color: extract the dominant color from the logo in Image 2 and use it for the text. The logo must retain its exact original colors.`
-    : `Letter/face color: ${primaryColor}.`
-
-  const lightDesc: Record<string, string> = {
-    none: "no artificial illumination — natural daylight shadows only",
-    internal_led: "front-lit with internal LED illumination (glowing faces)",
-    external: "externally flood-lit from above",
-    halo: "back-lit halo glow behind the letters",
-    neon: "neon tube lighting",
-    digital: "digital LED display",
-  }
-
-  const awningLightDesc: Record<string, string> = {
-    none: "natural daylight only, no artificial lighting on the awning",
-    internal_led: "the awning fabric is internally backlit — LED strips are mounted inside the frame, making the translucent fabric glow warmly from within at night",
-  }
-
-  if (signType === "awning") {
-    const framePhrase = awningFrame ?? "classic slope shed awning"
-    const fabricDesc = fabricName ? `in ${fabricName} Sunbrella® acrylic fabric` : `in a solid commercial-grade awning fabric (color: ${primaryColor})`
-    const awningLight = awningLightDesc[illumination] ?? awningLightDesc["none"]
-
-    const awningColorDesc = brandMode === "logo-only" || brandMode === "logo-and-text"
-      ? [
-          `AWNING COLOR: Analyze the logo in Image 2 and choose an awning fabric color that complements and harmonizes with the logo's color palette. The awning should feel like a natural extension of the brand.`,
-          `LOGO COLORS: The logo must retain its exact original colors from Image 2.`,
-          brandMode === "logo-and-text" ? `TEXT COLOR: The business name text should be white or cream — a clean, neutral color that contrasts well with the awning and complements the logo.` : "",
-        ].filter(Boolean).join(" ")
-      : [
-          `AWNING COLOR: The awning fabric must be ${primaryColor}.`,
-          `TEXT COLOR: The business name text must be white or cream — a clean, neutral color that stands out clearly against the colored awning fabric.`,
-        ].join(" ")
-
-    return [
-      `Generate a photorealistic architectural photo of the storefront.`,
-      `Inside the golden highlighted area, install a professional fabric storefront awning`,
-      `with a ${framePhrase} profile, ${fabricDesc}.`,
-      `The sign displays ${contentDesc}.`,
-      awningColorDesc,
-      `Lighting: ${awningLight}.`,
-      `The awning must be physically mounted to the building fascia — no floating.`,
-      `Completely replace the golden highlighted area with this awning,`,
-      `restoring the original wall texture in any exposed areas around it.`,
-      cornerClause,
-      imageSlotDesc,
-    ].filter(Boolean).join(" ")
-  }
-
-  const signDesc: Record<SignType, string> = {
-    flat_cut: "flat-cut dimensional letters mounted to the facade",
-    channel_letters: "3D illuminated channel letter sign",
-    cabinet: "illuminated lightbox cabinet sign",
-    blade: "blade sign mounted perpendicular to the facade",
-    window_vinyl: "vinyl graphic lettering applied to the window glass",
-    monument: "ground-mounted monument sign in front of the building",
-    pylon: "tall freestanding pylon pole sign visible from the street",
-    awning: "fabric awning sign",
-    other: "custom dimensional sign",
-  }
-
-  return [
-    `Generate a photorealistic architectural photo of the storefront.`,
-    `Inside the area marked by the golden highlight, place a new professional ${signDesc[signType] ?? "sign"}`,
-    `that clearly displays ${contentDesc}.`,
-    colorDesc,
-    `Lighting: ${lightDesc[illumination] ?? "natural daylight"}.`,
-    `The sign must be physically mounted to the wall — do not let it float.`,
-    `Completely replace the golden highlighted area with this new signage,`,
-    `restoring the original wall texture in any exposed areas around the sign.`,
-    cornerClause,
-    imageSlotDesc,
-  ].filter(Boolean).join(" ")
-}
 
 type Part = { text: string } | { inlineData: { mimeType: string; data: string } }
 
@@ -258,12 +149,19 @@ export async function POST(req: NextRequest) {
       logoDataUrl?: string
       awningFrame?: string
       fabricName?: string
+      material?: string
+      panelFace?: PromptColor | null
+      panelBg?: PromptColor | null
+      acrylic?: PromptColor | null
+      lightType?: string
+      returnGlow?: string
       count?: number
     }
 
     const {
       imageDataUrl, quad, signType, businessName, primaryColor, illumination,
       brandMode = "text-only", logoDataUrl, awningFrame, fabricName,
+      material, panelFace, panelBg, acrylic, lightType, returnGlow,
       count = 3,
     } = body
 
@@ -326,6 +224,7 @@ export async function POST(req: NextRequest) {
 
     const prompt = buildSignPrompt({
       businessName, signType, primaryColor, illumination, brandMode, hasLogo,
+      material, panelFace, panelBg, acrylic, lightType, returnGlow,
       awningFrame, fabricName, isCorner, foldXPct,
     })
 
