@@ -210,17 +210,20 @@ export default function NewOrderPage() {
   const [sizeResult, setSizeResult] = useState<SizeResult | null>(null)
   const [estimating, setEstimating] = useState(false)
   const [estimateError, setEstimateError] = useState<string | null>(null)
-  const [previewDataUrl, setPreviewDataUrl] = useState<string | null>(null)
+  const [previewOptions, setPreviewOptions] = useState<string[]>([])
+  const [selectedPreviewIdx, setSelectedPreviewIdx] = useState<number>(0)
   const [previewSkipped, setPreviewSkipped] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
-  const [regenCount, setRegenCount] = useState(0)
+
+  const previewDataUrl = previewOptions[selectedPreviewIdx] ?? null
   const [submitting, startSubmit] = useTransition()
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   // Sign spec fields
   const [signType, setSignType] = useState<SignType>("channel_letters")
   const [businessName, setBusinessName] = useState("")
+  const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
   const [primaryColor, setPrimaryColor] = useState("#1C1C1C")
   const [secondaryColor, setSecondaryColor] = useState("")
   const [material, setMaterial] = useState<SignMaterial>("aluminum")
@@ -234,6 +237,42 @@ export default function NewOrderPage() {
   const [isCorner, setIsCorner] = useState(false)
 
   const stepIdx = STEPS.indexOf(step)
+
+  const brandMode: "text-only" | "logo-only" | "logo-and-text" =
+    logoDataUrl && businessName ? "logo-and-text"
+    : logoDataUrl               ? "logo-only"
+    :                             "text-only"
+
+  function extractDominantColor(dataUrl: string): Promise<string> {
+    return new Promise((resolve) => {
+      const img = document.createElement("img")
+      img.onload = () => {
+        const canvas = document.createElement("canvas")
+        const ctx = canvas.getContext("2d")
+        if (!ctx) { resolve("#1C1C1C"); return }
+        canvas.width = 100; canvas.height = 100
+        ctx.drawImage(img, 0, 0, 100, 100)
+        try {
+          const { data } = ctx.getImageData(0, 0, 100, 100)
+          const colorMap: Record<string, number> = {}
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!, a = data[i + 3]!
+            if (a < 128 || (r > 240 && g > 240 && b > 240)) continue
+            const key = `${Math.floor(r / 32) * 32},${Math.floor(g / 32) * 32},${Math.floor(b / 32) * 32}`
+            colorMap[key] = (colorMap[key] ?? 0) + 1
+          }
+          let maxCount = 0, dominant = "28,28,28"
+          for (const [color, count] of Object.entries(colorMap)) {
+            if (count > maxCount) { maxCount = count; dominant = color }
+          }
+          const [rr, gg, bb] = dominant.split(",").map(Number)
+          resolve("#" + [rr, gg, bb].map((x) => (x ?? 0).toString(16).padStart(2, "0")).join(""))
+        } catch { resolve("#1C1C1C") }
+      }
+      img.onerror = () => resolve("#1C1C1C")
+      img.src = dataUrl
+    })
+  }
 
   // Colors shown: always include the 12 common + the currently selected color (even if not common)
   const visibleColors = showAllColors
@@ -265,25 +304,39 @@ export default function NewOrderPage() {
     if (!photoDataUrl || !quad) return
     setGenerating(true)
     setGenerateError(null)
-    setPreviewDataUrl(null)
+    setPreviewOptions([])
+    setSelectedPreviewIdx(0)
     setPreviewSkipped(false)
+
     try {
       const res = await fetch("/api/order/generate-preview", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          imageDataUrl: photoDataUrl, quad, signType, businessName,
+          imageDataUrl: photoDataUrl, quad, signType, businessName, brandMode,
+          logoDataUrl: logoDataUrl ?? undefined,
           primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
           illumination,
           awningFrame: signType === "awning" ? awningFrame : undefined,
           fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+          count: 3,
         }),
       })
-      const data = await res.json()
+
+      const text = await res.text()
+      let data: { previewDataUrls?: string[]; skipped?: boolean; error?: string }
+      try {
+        data = JSON.parse(text)
+      } catch {
+        throw new Error(`Server error (${res.status}) — please try again.`)
+      }
+
       if (data.skipped) { setPreviewSkipped(true); return }
-      if (!res.ok) throw new Error(data.error ?? "Preview generation failed")
-      setPreviewDataUrl(data.previewDataUrl)
-      setRegenCount(c => c + 1)
+      if (!res.ok) throw new Error(data.error ?? `Server error (${res.status})`)
+
+      const urls = data.previewDataUrls ?? []
+      if (urls.length === 0) throw new Error("No previews were generated. Please try again.")
+      setPreviewOptions(urls)
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "Preview generation failed")
     } finally {
@@ -291,15 +344,17 @@ export default function NewOrderPage() {
     }
   }
 
+  const hasBrandInput = !!(businessName || logoDataUrl)
+
   function goTo(s: Step) {
     if (s === "quad" && !photoDataUrl) return
     if (s === "customize" && !quad) return
-    if (s === "preview" && (!businessName || !signType)) return
+    if (s === "preview" && (!hasBrandInput || !signType)) return
     setStep(s)
   }
 
   function handleSubmit() {
-    if (!photoDataUrl || !quad || !sizeResult || !businessName) return
+    if (!photoDataUrl || !quad || !sizeResult || !hasBrandInput) return
     setSubmitError(null)
 
     const signSpec: SignSpec = {
@@ -325,10 +380,11 @@ export default function NewOrderPage() {
         awning_frame_style: awningFrame,
         awning_fabric: awningFabric,
       }),
+      brand_mode: brandMode,
     }
 
     startSubmit(async () => {
-      const result = await createOrder({ photoDataUrl, previewDataUrl, signSpec })
+      const result = await createOrder({ photoDataUrl, previewDataUrl, logoDataUrl, signSpec })
       if ("error" in result) {
         setSubmitError(result.error)
       } else {
@@ -370,7 +426,7 @@ export default function NewOrderPage() {
             <h1 className="text-2xl font-bold">Upload your storefront photo</h1>
             <p className="text-muted-foreground mt-1">We use this to estimate your sign size and generate an AI preview.</p>
           </div>
-          <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setSizeResult(null); setPreviewDataUrl(null) }} />
+          <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setSizeResult(null); setPreviewOptions([]); setLogoDataUrl(null) }} />
           {photoDataUrl && (
             <button
               onClick={() => setStep("quad")}
@@ -502,14 +558,83 @@ export default function NewOrderPage() {
           </div>
 
           <div className="space-y-5">
+            {/* Logo upload */}
             <div>
-              <label className="block text-sm font-medium mb-2">Business name on the sign *</label>
+              <label className="block text-sm font-medium mb-1">Logo <span className="text-muted-foreground font-normal">(optional)</span></label>
+              <p className="text-xs text-muted-foreground mb-2">PNG with transparent background works best. When uploaded, colors are extracted automatically.</p>
+              {logoDataUrl ? (
+                <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={logoDataUrl} alt="Logo" className="h-10 w-auto object-contain rounded" />
+                  <span className="flex-1 text-sm text-foreground font-medium">Logo uploaded</span>
+                  <button
+                    type="button"
+                    onClick={() => setLogoDataUrl(null)}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <label className="flex items-center gap-3 border-2 border-dashed border-border rounded-lg px-4 py-3 cursor-pointer hover:border-accent/50 transition-colors">
+                  <span className="text-2xl">🖼️</span>
+                  <div>
+                    <p className="text-sm font-medium">Upload your logo</p>
+                    <p className="text-xs text-muted-foreground">PNG, JPG, SVG</p>
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    className="sr-only"
+                    onChange={async e => {
+                      const file = e.target.files?.[0]
+                      if (!file) return
+                      const reader = new FileReader()
+                      reader.onload = async (ev) => {
+                        const url = ev.target?.result as string
+                        setLogoDataUrl(url)
+                        // Auto-fill color from logo when name is also present
+                        if (businessName) {
+                          const color = await extractDominantColor(url)
+                          setPrimaryColor(color)
+                        }
+                      }
+                      reader.readAsDataURL(file)
+                    }}
+                  />
+                </label>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="flex-1 h-px bg-border" />
+              <span className="text-xs text-muted-foreground font-medium">AND / OR</span>
+              <div className="flex-1 h-px bg-border" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-2">Business name on the sign {!logoDataUrl && <span className="text-destructive">*</span>}</label>
               <input
                 value={businessName}
-                onChange={e => setBusinessName(e.target.value)}
+                onChange={async e => {
+                  setBusinessName(e.target.value)
+                  // When user types a name and a logo is already loaded, extract color
+                  if (e.target.value && logoDataUrl) {
+                    const color = await extractDominantColor(logoDataUrl)
+                    setPrimaryColor(color)
+                  }
+                }}
                 placeholder="e.g. Joe's Pizza"
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
+              {!businessName && !logoDataUrl && (
+                <p className="text-xs text-muted-foreground mt-1">Required if no logo is uploaded.</p>
+              )}
+              {brandMode !== "text-only" && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {brandMode === "logo-only" ? "Logo only — sign will display your logo." : "Logo + name — sign will display both."}
+                </p>
+              )}
             </div>
 
             <div>
@@ -719,7 +844,7 @@ export default function NewOrderPage() {
             </button>
             <button
               onClick={() => { setStep("preview"); runPreview() }}
-              disabled={!businessName}
+              disabled={!hasBrandInput}
               className="flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               Continue → AI Preview
@@ -770,7 +895,7 @@ export default function NewOrderPage() {
             <div className="border border-border rounded-xl p-12 text-center space-y-3">
               <div className="text-4xl animate-pulse">🎨</div>
               <p className="font-medium">Generating preview…</p>
-              <p className="text-sm text-muted-foreground">Gemini is rendering your sign. This takes ~20 seconds.</p>
+              <p className="text-sm text-muted-foreground">Generating 3 options — this takes about 60 seconds.</p>
             </div>
           )}
 
@@ -788,32 +913,53 @@ export default function NewOrderPage() {
             <div className="border border-red-200 bg-red-50 rounded-xl p-5 space-y-3">
               <p className="text-sm font-medium text-red-700">Preview generation failed</p>
               <p className="text-sm text-red-600">{generateError}</p>
-              {regenCount < 3 && (
-                <button onClick={runPreview} className="text-sm text-accent font-medium hover:underline">
-                  Try again
-                </button>
-              )}
+              <button onClick={runPreview} className="text-sm text-accent font-medium hover:underline">
+                Try again
+              </button>
             </div>
           )}
 
-          {!generating && previewDataUrl && (
-            <div className="space-y-3">
-              <div className="rounded-xl overflow-hidden border border-border">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={previewDataUrl} alt="AI sign preview" className="w-full" />
+          {!generating && previewOptions.length > 0 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium">Choose an option:</p>
+              <div className="grid grid-cols-1 gap-3">
+                {previewOptions.map((url, i) => (
+                  <button
+                    key={i}
+                    onClick={() => setSelectedPreviewIdx(i)}
+                    className={`relative rounded-xl overflow-hidden border-2 transition-colors text-left ${
+                      selectedPreviewIdx === i
+                        ? "border-accent ring-2 ring-accent/30"
+                        : "border-border hover:border-accent/50"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={url} alt={`Option ${i + 1}`} className="w-full" />
+                    <div className={`absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
+                      selectedPreviewIdx === i
+                        ? "bg-accent text-accent-foreground"
+                        : "bg-black/50 text-white"
+                    }`}>
+                      {i + 1}
+                    </div>
+                    {selectedPreviewIdx === i && (
+                      <div className="absolute top-2 right-2 bg-accent text-accent-foreground text-xs font-semibold px-2 py-0.5 rounded-full">
+                        Selected
+                      </div>
+                    )}
+                  </button>
+                ))}
               </div>
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">
-                  AI-generated preview. Actual result will vary — your sign company measures on-site.
+                  AI-generated previews. Actual result will vary — your sign company measures on-site.
                 </p>
-                {regenCount < 3 && (
-                  <button
-                    onClick={runPreview}
-                    className="text-xs text-accent font-medium hover:underline flex-shrink-0 ml-2"
-                  >
-                    Regenerate ({3 - regenCount} left)
-                  </button>
-                )}
+                <button
+                  onClick={runPreview}
+                  className="text-xs text-accent font-medium hover:underline flex-shrink-0 ml-2"
+                >
+                  Regenerate
+                </button>
               </div>
             </div>
           )}

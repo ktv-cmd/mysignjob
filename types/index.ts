@@ -93,6 +93,9 @@ export interface SignSpec {
   // Awning-specific (only when sign_type === "awning")
   awning_frame_style?: AwningFrameStyle
   awning_fabric?: SunbrellaFabric
+  // Brand / logo
+  brand_mode?: "text-only" | "logo-only" | "logo-and-text"
+  logo_url?: string | null
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────

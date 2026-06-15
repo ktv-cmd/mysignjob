@@ -7,6 +7,7 @@ import type { SignSpec } from "@/types"
 export async function createOrder(params: {
   photoDataUrl: string
   previewDataUrl: string | null
+  logoDataUrl?: string | null
   signSpec: SignSpec
 }): Promise<{ error: string } | { orderId: string }> {
   const supabase = await createClient()
@@ -27,6 +28,21 @@ export async function createOrder(params: {
   const { data: { publicUrl: storefrontUrl } } = supabase.storage
     .from("documents")
     .getPublicUrl(photoPath)
+
+  // Upload logo if present
+  let logoUrl: string | null = null
+  if (params.logoDataUrl) {
+    const logoBase64 = params.logoDataUrl.split(",")[1]
+    const logoBuffer = Buffer.from(logoBase64, "base64")
+    const ext = params.logoDataUrl.includes("image/png") ? "png" : "jpg"
+    const logoPath = `logos/${user.id}/${Date.now()}.${ext}`
+    const { error: logoErr } = await supabase.storage
+      .from("documents")
+      .upload(logoPath, logoBuffer, { contentType: ext === "png" ? "image/png" : "image/jpeg", upsert: false })
+    if (!logoErr) {
+      logoUrl = supabase.storage.from("documents").getPublicUrl(logoPath).data.publicUrl
+    }
+  }
 
   // Upload AI preview if present
   let previewUrl: string | null = null
@@ -50,7 +66,7 @@ export async function createOrder(params: {
     .insert({
       client_id: user.id,
       status: "submitted",
-      sign_spec: params.signSpec,
+      sign_spec: { ...params.signSpec, logo_url: logoUrl },
       storefront_photo_url: storefrontUrl,
       ai_preview_url: previewUrl,
       bid_deadline_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(), // 24hr window
