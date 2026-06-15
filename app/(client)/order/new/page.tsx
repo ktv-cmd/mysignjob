@@ -7,6 +7,11 @@ import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
 import { formatDimensions } from "@/lib/utils"
 import type { SignType, SignMaterial, IlluminationType, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
+import {
+  DURABOND_COLORS, ACRYLIC_COLORS, LIGHT_TYPES, RETURN_GLOW_OPTS,
+  DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
+  type PanelColor, type AcrylicColor, type LightType, type ReturnGlow,
+} from "@/lib/sign-colors"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
 
@@ -202,6 +207,131 @@ function AwningFrameIcon({ style, active }: { style: AwningFrameStyle; active: b
   )
 }
 
+// ── Channel letter lighting type icon (cross-section of a letter) ──────────
+function LightTypeIcon({ type, active }: { type: LightType; active: boolean }) {
+  const c = active ? "#2563eb" : "#6b7280"
+  const lc = active ? "#93c5fd" : "#d1d5db"
+  // Letter cross-section: outer rect = return, inner = face, glow dots show emission
+  return (
+    <svg width="40" height="28" viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Wall */}
+      <rect x="0" y="20" width="40" height="4" rx="1" fill={lc} />
+      {/* Letter return (side wall) */}
+      <rect x="8" y="6" width="24" height="14" rx="2" fill="none" stroke={c} strokeWidth="1.5" />
+      {/* Letter face */}
+      <rect x="8" y="4" width="24" height="4" rx="1" fill={c} />
+      {/* Front glow (front / front_halo) */}
+      {(type === "front" || type === "front_halo") && (
+        <ellipse cx="20" cy="2" rx="8" ry="2" fill={lc} opacity="0.9" />
+      )}
+      {/* Halo glow on wall (halo / front_halo) */}
+      {(type === "halo" || type === "front_halo") && (
+        <ellipse cx="20" cy="22" rx="12" ry="2" fill={lc} opacity="0.8" />
+      )}
+      {/* Neon squiggle */}
+      {type === "neon" && (
+        <path d="M10 11 Q15 7 20 11 Q25 15 30 11" stroke="#f59e0b" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      )}
+      {/* No light X */}
+      {type === "none" && (
+        <g opacity="0.4">
+          <line x1="12" y1="8" x2="28" y2="18" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+          <line x1="28" y1="8" x2="12" y2="18" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
+        </g>
+      )}
+    </svg>
+  )
+}
+
+// ── Return glow depth icon (letter cross-section showing return fill) ────────
+function ReturnGlowIcon({ glow, active }: { glow: ReturnGlow; active: boolean }) {
+  const c  = active ? "#2563eb" : "#6b7280"
+  const lc = active ? "#93c5fd" : "#d1d5db"
+  // Side depth fill amounts
+  const fills: Record<ReturnGlow, number> = {
+    back_only: 0, subtle_side: 4, half_side: 7, full_side: 14,
+  }
+  const fill = fills[glow]
+  return (
+    <svg width="40" height="28" viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Wall */}
+      <rect x="0" y="20" width="40" height="4" rx="1" fill={lc} />
+      {/* Return fill (glow on side) */}
+      {fill > 0 && (
+        <rect x="8" y={20 - fill} width="24" height={fill} rx="1" fill={lc} opacity="0.7" />
+      )}
+      {/* Letter return border */}
+      <rect x="8" y="6" width="24" height="14" rx="2" fill="none" stroke={c} strokeWidth="1.5" />
+      {/* Letter face */}
+      <rect x="8" y="4" width="24" height="4" rx="1" fill={c} />
+      {/* Halo glow on wall */}
+      <ellipse cx="20" cy="22" rx="12" ry="2" fill={lc} opacity="0.8" />
+    </svg>
+  )
+}
+
+// ── Dura-Bond / panel color picker (reusable for face + bg) ─────────────────
+function PanelColorPicker({
+  label, subtitle, selected, onSelect, visible, showAll, onToggleAll, total,
+}: {
+  label: string
+  subtitle: string
+  selected: PanelColor
+  onSelect: (c: PanelColor) => void
+  visible: PanelColor[]
+  showAll: boolean
+  onToggleAll: () => void
+  total: number
+}) {
+  return (
+    <div>
+      <label className="block text-sm font-medium mb-1">{label}</label>
+      <p className="text-xs text-muted-foreground mb-3">
+        {subtitle}. Selected: <span className="font-medium">{selected.name}</span>
+        <span className="text-muted-foreground"> · {selected.code}</span>
+        {selected.finish && selected.finish !== "solid" && (
+          <span className="ml-1 capitalize text-accent">· {selected.finish}</span>
+        )}
+      </p>
+      <div className="grid grid-cols-6 gap-2">
+        {visible.map(c => {
+          const isSelected = c.code === selected.code
+          const bgStyle: React.CSSProperties = c.finish === "metallic" || c.finish === "mirror"
+            ? { background: `linear-gradient(135deg, ${c.hex}ee, ${c.hex}88, ${c.hex}dd)` }
+            : c.finish === "wood"
+            ? { background: `repeating-linear-gradient(90deg, ${c.hex} 0px, ${c.hex}cc 3px, ${c.hex}99 6px)` }
+            : { background: c.hex }
+          return (
+            <button key={c.code} type="button" title={`${c.name} (${c.code})`}
+              onClick={() => onSelect(c)}
+              className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                ${isSelected ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
+              <div className="w-full h-full" style={bgStyle} />
+              <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
+              </div>
+              {isSelected && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-white text-sm drop-shadow">✓</span>
+                </div>
+              )}
+            </button>
+          )
+        })}
+      </div>
+      <button type="button" onClick={onToggleAll}
+        className="mt-3 text-xs text-accent font-medium hover:underline">
+        {showAll ? `Show fewer ▴` : `Show all ${total} colors ▾`}
+      </button>
+      <div className="mt-2 flex items-center gap-2">
+        <div className="w-5 h-5 rounded border border-border flex-shrink-0" style={{ background: selected.hex }} />
+        <span className="text-sm font-medium">{selected.name}</span>
+        <span className="text-xs text-muted-foreground">{selected.code}</span>
+      </div>
+    </div>
+  )
+}
+
 export default function NewOrderPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("photo")
@@ -235,6 +365,17 @@ export default function NewOrderPage() {
   const [showAllColors, setShowAllColors] = useState(false)
   // Corner / wraparound sign
   const [isCorner, setIsCorner] = useState(false)
+  // Dura-Bond ACP colors (aluminum material)
+  const [panelFaceColor, setPanelFaceColor] = useState<PanelColor>(DEFAULT_PANEL_FACE_COLOR)
+  const [panelBgColor, setPanelBgColor] = useState<PanelColor>(DEFAULT_PANEL_BG_COLOR)
+  const [showAllPanelFace, setShowAllPanelFace] = useState(false)
+  const [showAllPanelBg, setShowAllPanelBg] = useState(false)
+  // Acrylic color
+  const [acrylicColor, setAcrylicColor] = useState<AcrylicColor>(DEFAULT_ACRYLIC_COLOR)
+  const [showAllAcrylic, setShowAllAcrylic] = useState(false)
+  // Channel letter lighting
+  const [lightType, setLightType] = useState<LightType>("front")
+  const [returnGlow, setReturnGlow] = useState<ReturnGlow>("back_only")
 
   const stepIdx = STEPS.indexOf(step)
 
@@ -278,6 +419,18 @@ export default function NewOrderPage() {
   const visibleColors = showAllColors
     ? SUNBRELLA_COLORS
     : SUNBRELLA_COLORS.filter(c => c.common || c.code === awningFabric.code)
+
+  const visiblePanelFace = showAllPanelFace
+    ? DURABOND_COLORS
+    : DURABOND_COLORS.filter(c => c.common || c.code === panelFaceColor.code)
+
+  const visiblePanelBg = showAllPanelBg
+    ? DURABOND_COLORS
+    : DURABOND_COLORS.filter(c => c.common || c.code === panelBgColor.code)
+
+  const visibleAcrylic = showAllAcrylic
+    ? ACRYLIC_COLORS
+    : ACRYLIC_COLORS.filter(c => c.common || c.code === acrylicColor.code)
 
   async function runEstimate(q: QuadPoint[]) {
     if (!photoDataUrl) return
@@ -381,6 +534,15 @@ export default function NewOrderPage() {
         awning_fabric: awningFabric,
       }),
       brand_mode: brandMode,
+      ...(signType !== "awning" && material === "aluminum" && {
+        panel_face_color: { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex },
+        panel_bg_color:   { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   },
+        channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
+      }),
+      ...(signType !== "awning" && material === "acrylic" && {
+        acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent },
+        channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
+      }),
     }
 
     startSubmit(async () => {
@@ -754,75 +916,152 @@ export default function NewOrderPage() {
               </>
             ) : (
               <>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Primary color</label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={primaryColor}
-                        onChange={e => setPrimaryColor(e.target.value)}
-                        className="w-10 h-10 rounded border border-border cursor-pointer"
-                      />
-                      <input
-                        value={primaryColor}
-                        onChange={e => setPrimaryColor(e.target.value)}
-                        className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium mb-2">Secondary color <span className="text-muted-foreground font-normal">(optional)</span></label>
-                    <div className="flex items-center gap-2">
-                      <input
-                        type="color"
-                        value={secondaryColor || "#ffffff"}
-                        onChange={e => setSecondaryColor(e.target.value)}
-                        className="w-10 h-10 rounded border border-border cursor-pointer"
-                      />
-                      <input
-                        value={secondaryColor}
-                        onChange={e => setSecondaryColor(e.target.value)}
-                        placeholder="#ffffff"
-                        className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono"
-                      />
-                    </div>
-                  </div>
-                </div>
-
+                {/* ── Material ── */}
                 <div>
-                  <label className="block text-sm font-medium mb-2">Illumination</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {ILLUMINATION_OPTS.map(o => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => setIllumination(o.value)}
-                        className={`text-left rounded-lg border px-3 py-2 text-xs transition-colors
-                          ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                      >
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium mb-2">Material preference</label>
-                  <div className="flex flex-wrap gap-2">
+                  <label className="block text-sm font-medium mb-2">Material</label>
+                  <div className="grid grid-cols-3 gap-2">
                     {MATERIAL_OPTS.map(o => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => setMaterial(o.value)}
-                        className={`rounded-full px-3 py-1 text-xs border transition-colors
-                          ${material === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                      >
+                      <button key={o.value} type="button" onClick={() => setMaterial(o.value)}
+                        className={`text-left rounded-lg border px-3 py-2 text-xs font-medium transition-colors
+                          ${material === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
                         {o.label}
                       </button>
                     ))}
                   </div>
                 </div>
+
+                {/* ── Dura-Bond ACP colors (aluminum) ── */}
+                {material === "aluminum" && (
+                  <>
+                    <PanelColorPicker
+                      label="Letter face color (Dura-Bond ACP)"
+                      subtitle="Color of the letter/panel face"
+                      selected={panelFaceColor}
+                      onSelect={setPanelFaceColor}
+                      visible={visiblePanelFace}
+                      showAll={showAllPanelFace}
+                      onToggleAll={() => setShowAllPanelFace(v => !v)}
+                      total={DURABOND_COLORS.length}
+                    />
+                    <PanelColorPicker
+                      label="Background panel color (Dura-Bond ACP)"
+                      subtitle="Color of the backer panel behind the letters"
+                      selected={panelBgColor}
+                      onSelect={setPanelBgColor}
+                      visible={visiblePanelBg}
+                      showAll={showAllPanelBg}
+                      onToggleAll={() => setShowAllPanelBg(v => !v)}
+                      total={DURABOND_COLORS.length}
+                    />
+                  </>
+                )}
+
+                {/* ── Acrylic color ── */}
+                {material === "acrylic" && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Acrylic face color</label>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Translucent acrylics glow with internal LED. Opaque for front-lit or unlit signs.
+                      Selected: <span className="font-medium">{acrylicColor.name}</span>
+                      <span className="text-muted-foreground"> · #{acrylicColor.code}</span>
+                      {acrylicColor.translucent && <span className="ml-1 text-accent">· translucent</span>}
+                    </p>
+                    <div className="grid grid-cols-6 gap-2">
+                      {visibleAcrylic.map(c => (
+                        <button key={c.code} type="button" title={`${c.name} (#${c.code})${c.translucent ? " — translucent" : ""}`}
+                          onClick={() => setAcrylicColor(c)}
+                          className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                            ${acrylicColor.code === c.code ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
+                          <div className="w-full h-full" style={{ background: c.hex, opacity: c.translucent ? 0.75 : 1 }} />
+                          {c.translucent && (
+                            <div className="absolute inset-0 flex items-start justify-end p-0.5">
+                              <span className="text-[8px] bg-white/80 text-accent rounded px-0.5 leading-tight font-medium">T</span>
+                            </div>
+                          )}
+                          <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                            <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
+                          </div>
+                          {acrylicColor.code === c.code && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                              <span className="text-white text-sm drop-shadow">✓</span>
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                    <button type="button" onClick={() => setShowAllAcrylic(v => !v)}
+                      className="mt-3 text-xs text-accent font-medium hover:underline">
+                      {showAllAcrylic ? `Show fewer ▴` : `Show all ${ACRYLIC_COLORS.length} colors ▾`}
+                    </button>
+                    <div className="mt-2 flex items-center gap-2">
+                      <div className="w-5 h-5 rounded border border-border flex-shrink-0"
+                        style={{ background: acrylicColor.hex, opacity: acrylicColor.translucent ? 0.75 : 1 }} />
+                      <span className="text-sm font-medium">{acrylicColor.name}</span>
+                      <span className="text-xs text-muted-foreground">#{acrylicColor.code}</span>
+                      {acrylicColor.translucent && <span className="text-xs text-accent">translucent</span>}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Other materials — simple color picker ── */}
+                {material !== "aluminum" && material !== "acrylic" && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Primary color</label>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={primaryColor} onChange={e => setPrimaryColor(e.target.value)}
+                          className="w-10 h-10 rounded border border-border cursor-pointer" />
+                        <input value={primaryColor} onChange={e => setPrimaryColor(e.target.value)}
+                          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Secondary color <span className="text-muted-foreground font-normal">(optional)</span></label>
+                      <div className="flex items-center gap-2">
+                        <input type="color" value={secondaryColor || "#ffffff"} onChange={e => setSecondaryColor(e.target.value)}
+                          className="w-10 h-10 rounded border border-border cursor-pointer" />
+                        <input value={secondaryColor} onChange={e => setSecondaryColor(e.target.value)}
+                          placeholder="#ffffff"
+                          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono" />
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Channel letter lighting (all non-awning signs) ── */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Lighting</label>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {LIGHT_TYPES.map(o => (
+                      <button key={o.value} type="button" onClick={() => setLightType(o.value)}
+                        className={`text-left rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors
+                          ${lightType === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
+                        <LightTypeIcon type={o.value} active={lightType === o.value} />
+                        <span className={`block font-medium leading-tight mt-1 ${lightType === o.value ? "text-accent" : ""}`}>{o.label}</span>
+                        <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{o.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* ── Return glow (only for halo / front+halo) ── */}
+                {(lightType === "halo" || lightType === "front_halo") && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Return glow depth</label>
+                    <p className="text-xs text-muted-foreground mb-2">How far the halo light wraps onto the letter return (side wall).</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {RETURN_GLOW_OPTS.map(o => (
+                        <button key={o.value} type="button" onClick={() => setReturnGlow(o.value)}
+                          className={`text-left rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors
+                            ${returnGlow === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
+                          <ReturnGlowIcon glow={o.value} active={returnGlow === o.value} />
+                          <span className={`block font-medium leading-tight mt-1 ${returnGlow === o.value ? "text-accent" : ""}`}>{o.label}</span>
+                          <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{o.desc}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -981,7 +1220,7 @@ export default function NewOrderPage() {
       )}
 
       {/* ── Step 5: Review & Submit ── */}
-      {step === "review" && sizeResult && (
+      {step === "review" && (
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-bold">Review & Submit</h1>
@@ -996,14 +1235,18 @@ export default function NewOrderPage() {
                 {isCorner && <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">corner</span>}
               </span>
             } />
-            {sizeResult.isCorner && sizeResult.frontWidthInches && sizeResult.sideWidthInches ? (
-              <>
-                <Row label="Front face" value={formatDimensions(sizeResult.frontWidthInches, sizeResult.heightInches)} />
-                <Row label="Side face" value={formatDimensions(sizeResult.sideWidthInches, sizeResult.heightInches)} />
-                <Row label="Total developed" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
-              </>
+            {sizeResult ? (
+              sizeResult.isCorner && sizeResult.frontWidthInches && sizeResult.sideWidthInches ? (
+                <>
+                  <Row label="Front face" value={formatDimensions(sizeResult.frontWidthInches, sizeResult.heightInches)} />
+                  <Row label="Side face" value={formatDimensions(sizeResult.sideWidthInches, sizeResult.heightInches)} />
+                  <Row label="Total developed" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
+                </>
+              ) : (
+                <Row label="Estimated size" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
+              )
             ) : (
-              <Row label="Estimated size" value={formatDimensions(sizeResult.widthInches, sizeResult.heightInches)} />
+              <Row label="Estimated size" value="Not estimated — go back to Mark Sign Area" />
             )}
             {signType === "awning" ? (
               <>

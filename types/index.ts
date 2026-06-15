@@ -96,6 +96,11 @@ export interface SignSpec {
   // Brand / logo
   brand_mode?: "text-only" | "logo-only" | "logo-and-text"
   logo_url?: string | null
+  // Channel letter material details
+  panel_face_color?: { name: string; code: string; hex: string }   // Dura-Bond ACP face
+  panel_bg_color?: { name: string; code: string; hex: string }     // Dura-Bond ACP background
+  acrylic_color?: { name: string; code: string; hex: string; translucent?: boolean }
+  channel_lighting?: { type: string; return_glow?: string }
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
