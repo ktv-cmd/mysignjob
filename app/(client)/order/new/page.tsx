@@ -46,6 +46,14 @@ const AWNING_LIGHTING: { value: IlluminationType; label: string; desc: string }[
   { value: "internal_led", label: "Backlit (interior light)", desc: "Fabric glows from inside the frame at night" },
 ]
 
+// Dura-Cast acrylic finish — client choice; filters the swatches below.
+const ACRYLIC_FINISHES: { value: "translucent" | "opaque" | "transparent" | "matte"; badge: string; label: string; desc: string }[] = [
+  { value: "translucent", badge: "T", label: "Translucent", desc: "Glows evenly with internal LED — best for lit signs" },
+  { value: "opaque",      badge: "O", label: "Opaque",      desc: "Solid color, no light passes through" },
+  { value: "transparent", badge: "◇", label: "Transparent", desc: "Tinted see-through, glass-like" },
+  { value: "matte",       badge: "M", label: "Matte",       desc: "Diffused, non-glossy soft finish" },
+]
+
 // Material choice for all non-awning signs — friendly durability + cost guidance.
 const SIGN_MATERIALS: {
   value: "acrylic" | "aluminum"
@@ -312,9 +320,18 @@ export default function NewOrderPage() {
   const [panelBgColor, setPanelBgColor] = useState<PanelColor>(DEFAULT_PANEL_BG_COLOR)
   const [showAllPanelFace, setShowAllPanelFace] = useState(false)
   const [showAllPanelBg, setShowAllPanelBg] = useState(false)
-  // Dura-Cast acrylic color
+  // Dura-Cast acrylic finish (client choice) + color
+  const [acrylicFinish, setAcrylicFinish] = useState<"translucent" | "opaque" | "transparent" | "matte">("translucent")
   const [acrylicColor, setAcrylicColor] = useState<AcrylicColor>(DEFAULT_ACRYLIC_COLOR)
-  const [showAllAcrylic, setShowAllAcrylic] = useState(false)
+
+  // When the finish changes, keep the color valid for that finish.
+  function chooseAcrylicFinish(finish: "translucent" | "opaque" | "transparent" | "matte") {
+    setAcrylicFinish(finish)
+    if (acrylicColor.finish !== finish) {
+      const first = ACRYLIC_COLORS.find(c => c.finish === finish)
+      if (first) setAcrylicColor(first)
+    }
+  }
 
   // ── Derived from the selected reference style ──
   const selectedReference = REFERENCE_STYLES.find(r => r.id === referenceId) ?? DEFAULT_REFERENCE
@@ -379,9 +396,8 @@ export default function NewOrderPage() {
     ? DURABOND_COLORS
     : DURABOND_COLORS.filter(c => c.common || c.code === panelBgColor.code)
 
-  const visibleAcrylic = showAllAcrylic
-    ? ACRYLIC_COLORS
-    : ACRYLIC_COLORS.filter(c => c.common || (c.code === acrylicColor.code && c.finish === acrylicColor.finish))
+  // Colors are filtered to the chosen finish (client picks the finish first).
+  const visibleAcrylic = ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish)
 
   // Build the exact prompt params shared by the client (display) and server (generation)
   function buildPromptParams(): SignPromptParams {
@@ -1004,18 +1020,32 @@ export default function NewOrderPage() {
                   </>
                 )}
 
-                {/* ── Dura-Cast® Acrylic color (illuminated styles) ── */}
+                {/* ── Dura-Cast® Acrylic finish + color (illuminated styles) ── */}
                 {colorSystem === "acrylic" && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">Dura-Cast® acrylic face color</label>
-                    <p className="text-xs text-muted-foreground mb-2">
-                      <span className="inline-flex gap-2 flex-wrap">
-                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">T</span> Translucent — glows with LED</span>
-                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">O</span> Opaque — solid, no light-through</span>
-                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">◇</span> Transparent — tinted see-through</span>
-                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">M</span> Matte — diffused non-gloss</span>
-                      </span>
-                    </p>
+                    {/* Finish selector (client choice) */}
+                    <label className="block text-sm font-medium mb-1">Dura-Cast® acrylic finish</label>
+                    <p className="text-xs text-muted-foreground mb-2">Pick how the face behaves with light, then choose a color.</p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                      {ACRYLIC_FINISHES.map(f => {
+                        const active = acrylicFinish === f.value
+                        return (
+                          <button key={f.value} type="button" onClick={() => chooseAcrylicFinish(f.value)}
+                            className={`text-left rounded-lg border-2 p-2.5 transition-all
+                              ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                            <span className="flex items-center gap-1.5 mb-0.5">
+                              <span className="font-mono text-[11px] font-bold bg-muted rounded px-1">{f.badge}</span>
+                              <span className={`text-xs font-semibold ${active ? "text-accent" : ""}`}>{f.label}</span>
+                            </span>
+                            <span className="block text-[10px] text-muted-foreground leading-snug">{f.desc}</span>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    <label className="block text-sm font-medium mb-2">
+                      {ACRYLIC_FINISHES.find(f => f.value === acrylicFinish)?.label} face color
+                    </label>
                     <div className="grid grid-cols-6 gap-2">
                       {visibleAcrylic.map(c => {
                         const finishBadge = c.finish === "translucent" ? "T" : c.finish === "opaque" ? "O" : c.finish === "transparent" ? "◇" : "M"
@@ -1042,11 +1072,7 @@ export default function NewOrderPage() {
                         )
                       })}
                     </div>
-                    <button type="button" onClick={() => setShowAllAcrylic(v => !v)}
-                      className="mt-3 text-xs text-accent font-medium hover:underline">
-                      {showAllAcrylic ? `Show fewer ▴` : `Show all ${ACRYLIC_COLORS.length} colors ▾`}
-                    </button>
-                    <div className="mt-2 flex items-center gap-2">
+                    <div className="mt-3 flex items-center gap-2">
                       <div className="w-5 h-5 rounded border border-border flex-shrink-0"
                         style={{ background: acrylicColor.hex, opacity: acrylicColor.finish === "translucent" ? 0.75 : acrylicColor.finish === "transparent" ? 0.55 : 1 }} />
                       <span className="text-sm font-medium">{acrylicColor.name}</span>
