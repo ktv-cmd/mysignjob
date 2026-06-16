@@ -6,7 +6,7 @@ import PhotoUpload from "@/components/order/PhotoUpload"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
 import { formatDimensions } from "@/lib/utils"
-import type { IlluminationType, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
+import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
@@ -44,6 +44,30 @@ interface SizeResult {
 const AWNING_LIGHTING: { value: IlluminationType; label: string; desc: string }[] = [
   { value: "none",         label: "No Lighting",             desc: "Daytime only, no illumination" },
   { value: "internal_led", label: "Backlit (interior light)", desc: "Fabric glows from inside the frame at night" },
+]
+
+// Material choice for all non-awning signs — friendly durability + cost guidance.
+const SIGN_MATERIALS: {
+  value: "acrylic" | "aluminum"
+  label: string
+  cost: string          // short cost tag
+  costTone: string      // tailwind classes for the cost pill
+  desc: string
+}[] = [
+  {
+    value: "acrylic",
+    label: "Acrylic",
+    cost: "$ · More affordable",
+    costTone: "bg-green-100 text-green-700",
+    desc: "Lightweight cast acrylic. Best value and ideal for illuminated signs — the faces glow beautifully. Holds up well outdoors for years; colors can fade slightly faster than metal over a long lifespan.",
+  },
+  {
+    value: "aluminum",
+    label: "Aluminum",
+    cost: "$$ · Premium",
+    costTone: "bg-amber-100 text-amber-700",
+    desc: "Aluminum composite panel (Dura-Bond). The most durable, fully weatherproof and rust-free with a high-end finish. Costs more than acrylic but lasts the longest with minimal upkeep.",
+  },
 ]
 
 // ── Awning frame styles (industry standard — most common is "standard" shed slope)
@@ -269,6 +293,7 @@ export default function NewOrderPage() {
   // Sign spec fields
   // ── Primary signage selector: reference style (webs/signs structure) ──
   const [referenceId, setReferenceId] = useState<string>(DEFAULT_REFERENCE.id)
+  const [signMaterial, setSignMaterial] = useState<"acrylic" | "aluminum">("acrylic") // cheaper default
   const [fontStyle, setFontStyle] = useState<FontStyle>("modern-sans")
   const [businessName, setBusinessName] = useState("")
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
@@ -295,11 +320,13 @@ export default function NewOrderPage() {
   const selectedReference = REFERENCE_STYLES.find(r => r.id === referenceId) ?? DEFAULT_REFERENCE
   const mapping = getSpecMapping(referenceId)
   const signType = mapping.signType
-  const material = mapping.material
-  const colorSystem = mapping.colorSystem
   const isAwning = referenceId === "awning"
   const lightingType = selectedReference.lightingType
   const illumination: IlluminationType = isAwning ? awningIllumination : mapping.illumination
+  // Material is a CLIENT choice for every non-awning style (default = cheaper acrylic).
+  const material: SignMaterial = isAwning ? "vinyl" : signMaterial
+  const colorSystem: "durabond" | "acrylic" | "awning" =
+    isAwning ? "awning" : signMaterial === "aluminum" ? "durabond" : "acrylic"
 
   const stepIdx = STEPS.indexOf(step)
 
@@ -927,7 +954,31 @@ export default function NewOrderPage() {
                   </span>
                 </div>
 
-                {/* ── Dura-Bond ACP colors (no-light / aluminum styles) ── */}
+                {/* ── Material choice (acrylic vs aluminum) ── */}
+                <div>
+                  <label className="block text-sm font-medium mb-1">Material</label>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Acrylic is more affordable; aluminum is more durable and premium. Default is acrylic.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {SIGN_MATERIALS.map(m => {
+                      const active = signMaterial === m.value
+                      return (
+                        <button key={m.value} type="button" onClick={() => setSignMaterial(m.value)}
+                          className={`text-left rounded-lg border-2 p-3 transition-all
+                            ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className={`text-sm font-semibold ${active ? "text-accent" : ""}`}>{m.label}</span>
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${m.costTone}`}>{m.cost}</span>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground leading-snug">{m.desc}</p>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+
+                {/* ── Dura-Bond ACP colors (aluminum) ── */}
                 {colorSystem === "durabond" && (
                   <>
                     <PanelColorPicker
@@ -1238,6 +1289,7 @@ export default function NewOrderPage() {
                 {businessName.trim() && (
                   <Row label="Font" value={FONT_OPTIONS.find(f => f.id === fontStyle)?.name ?? fontStyle} />
                 )}
+                <Row label="Material" value={SIGN_MATERIALS.find(m => m.value === signMaterial)?.label ?? signMaterial} />
                 {colorSystem === "durabond" && (
                   <Row label="Face / background" value={
                     <span className="flex items-center gap-2">
