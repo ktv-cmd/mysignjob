@@ -431,7 +431,7 @@ export default function NewOrderPage() {
 
   const visibleAcrylic = showAllAcrylic
     ? ACRYLIC_COLORS
-    : ACRYLIC_COLORS.filter(c => c.common || c.code === acrylicColor.code)
+    : ACRYLIC_COLORS.filter(c => c.common || (c.code === acrylicColor.code && c.finish === acrylicColor.finish))
 
   // Build the exact prompt params shared by the client (display) and server (generation)
   function buildPromptParams(): SignPromptParams {
@@ -446,7 +446,7 @@ export default function NewOrderPage() {
       primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
       panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
       panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : null,
-      acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent } : null,
+      acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
       lightType,
       returnGlow,
       awningFrame: signType === "awning" ? awningFrame : undefined,
@@ -502,7 +502,7 @@ export default function NewOrderPage() {
           material,
           panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
           panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : undefined,
-          acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent } : undefined,
+          acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
           lightType, returnGlow,
           awningFrame: signType === "awning" ? awningFrame : undefined,
           fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
@@ -574,7 +574,7 @@ export default function NewOrderPage() {
         channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
       }),
       ...(signType !== "awning" && material === "acrylic" && {
-        acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, translucent: acrylicColor.translucent },
+        acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish },
         channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
       }),
     }
@@ -990,38 +990,43 @@ export default function NewOrderPage() {
                   </>
                 )}
 
-                {/* ── Acrylic color ── */}
+                {/* ── Dura-Cast® Acrylic color ── */}
                 {material === "acrylic" && (
                   <div>
-                    <label className="block text-sm font-medium mb-1">Acrylic face color</label>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Translucent acrylics glow with internal LED. Opaque for front-lit or unlit signs.
-                      Selected: <span className="font-medium">{acrylicColor.name}</span>
-                      <span className="text-muted-foreground"> · #{acrylicColor.code}</span>
-                      {acrylicColor.translucent && <span className="ml-1 text-accent">· translucent</span>}
+                    <label className="block text-sm font-medium mb-1">Dura-Cast® acrylic face color</label>
+                    <p className="text-xs text-muted-foreground mb-2">
+                      <span className="inline-flex gap-2 flex-wrap">
+                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">T</span> Translucent — glows with LED</span>
+                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">O</span> Opaque — solid, no light-through</span>
+                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">◇</span> Transparent — tinted see-through</span>
+                        <span><span className="font-mono bg-muted px-1 rounded text-[10px]">M</span> Matte — diffused non-gloss</span>
+                      </span>
                     </p>
                     <div className="grid grid-cols-6 gap-2">
-                      {visibleAcrylic.map(c => (
-                        <button key={c.code} type="button" title={`${c.name} (#${c.code})${c.translucent ? " — translucent" : ""}`}
-                          onClick={() => setAcrylicColor(c)}
-                          className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                            ${acrylicColor.code === c.code ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
-                          <div className="w-full h-full" style={{ background: c.hex, opacity: c.translucent ? 0.75 : 1 }} />
-                          {c.translucent && (
+                      {visibleAcrylic.map(c => {
+                        const finishBadge = c.finish === "translucent" ? "T" : c.finish === "opaque" ? "O" : c.finish === "transparent" ? "◇" : "M"
+                        const opacity = c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1
+                        return (
+                          <button key={`${c.code}-${c.finish}`} type="button"
+                            title={`${c.name} #${c.code} — ${c.finish}`}
+                            onClick={() => setAcrylicColor(c)}
+                            className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                              ${acrylicColor.code === c.code && acrylicColor.finish === c.finish ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
+                            <div className="w-full h-full" style={{ background: c.hex, opacity }} />
                             <div className="absolute inset-0 flex items-start justify-end p-0.5">
-                              <span className="text-[8px] bg-white/80 text-accent rounded px-0.5 leading-tight font-medium">T</span>
+                              <span className="text-[8px] bg-white/80 text-foreground rounded px-0.5 leading-tight font-bold">{finishBadge}</span>
                             </div>
-                          )}
-                          <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                            <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
-                          </div>
-                          {acrylicColor.code === c.code && (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <span className="text-white text-sm drop-shadow">✓</span>
+                            <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                              <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
                             </div>
-                          )}
-                        </button>
-                      ))}
+                            {acrylicColor.code === c.code && acrylicColor.finish === c.finish && (
+                              <div className="absolute inset-0 flex items-center justify-center">
+                                <span className="text-white text-sm drop-shadow">✓</span>
+                              </div>
+                            )}
+                          </button>
+                        )
+                      })}
                     </div>
                     <button type="button" onClick={() => setShowAllAcrylic(v => !v)}
                       className="mt-3 text-xs text-accent font-medium hover:underline">
@@ -1029,10 +1034,10 @@ export default function NewOrderPage() {
                     </button>
                     <div className="mt-2 flex items-center gap-2">
                       <div className="w-5 h-5 rounded border border-border flex-shrink-0"
-                        style={{ background: acrylicColor.hex, opacity: acrylicColor.translucent ? 0.75 : 1 }} />
+                        style={{ background: acrylicColor.hex, opacity: acrylicColor.finish === "translucent" ? 0.75 : acrylicColor.finish === "transparent" ? 0.55 : 1 }} />
                       <span className="text-sm font-medium">{acrylicColor.name}</span>
                       <span className="text-xs text-muted-foreground">#{acrylicColor.code}</span>
-                      {acrylicColor.translucent && <span className="text-xs text-accent">translucent</span>}
+                      <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
                     </div>
                   </div>
                 )}

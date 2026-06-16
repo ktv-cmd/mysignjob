@@ -72,47 +72,45 @@ export const DURABOND_COLORS: PanelColor[] = [
 export const DEFAULT_PANEL_FACE_COLOR = DURABOND_COLORS.find(c => c.code === "DB-30")! // Black
 export const DEFAULT_PANEL_BG_COLOR   = DURABOND_COLORS.find(c => c.code === "DB-03")! // Signal White
 
-// ─── Acrylic Sign Face Colors ─────────────────────────────────────────────────
-// Standard cast-acrylic colors used in channel letter faces.
-// translucent: glows with internal LED; opaque: for front-lit / non-lit faces only
-// Hex values approximate the daylight appearance of the acrylic sheet
+// ─── Dura-Cast® Acrylic Sign Face Colors ─────────────────────────────────────
+// Real Dura-Cast colors sourced from sfsupplies.com catalog
+// finish: 'translucent' = glows with LED; 'opaque' = solid, front-lit/no-lit only
+//         'transparent' = see-through tinted; 'matte' = diffused non-gloss
+// Hex values approximate daylight appearance of the sheet
+// common: shown in collapsed default grid
+
+export type AcrylicFinish = "translucent" | "opaque" | "transparent" | "matte"
 
 export interface AcrylicColor {
   name: string
-  code: string   // industry face code (Plexiglas/Cyro numbering common in sign trade)
+  code: string
   hex: string
-  translucent?: boolean
+  finish: AcrylicFinish
   common?: boolean
 }
 
 export const ACRYLIC_COLORS: AcrylicColor[] = [
-  // Whites / Neutrals
-  { name: "White",           code: "2447", hex: "#F8F8F8", translucent: true,  common: true  },
-  { name: "Satin White",     code: "7328", hex: "#F0F0EE", translucent: true                 },
-  { name: "Ivory",           code: "1579", hex: "#F4ECD4"                                    },
-  // Reds
-  { name: "Bright Red",      code: "2283", hex: "#D41A1A", translucent: true,  common: true  },
-  { name: "Dark Red",        code: "2793", hex: "#8B0000", translucent: true                 },
-  { name: "Pink",            code: "9093", hex: "#E87070", translucent: true                 },
-  // Oranges / Yellows
-  { name: "Orange",          code: "2037", hex: "#E86020", translucent: true,  common: true  },
-  { name: "Amber",           code: "2422", hex: "#D4900A", translucent: true                 },
-  { name: "Yellow",          code: "2208", hex: "#F5D000", translucent: true,  common: true  },
-  // Greens
-  { name: "Green",           code: "2092", hex: "#228B22", translucent: true,  common: true  },
-  { name: "Light Green",     code: "2108", hex: "#3CB371", translucent: true                 },
-  // Blues
-  { name: "Blue",            code: "2050", hex: "#1E50B4", translucent: true,  common: true  },
-  { name: "Light Blue",      code: "2069", hex: "#4090D0", translucent: true                 },
-  { name: "Royal Blue",      code: "2390", hex: "#1A2A80", translucent: true                 },
-  // Black
-  { name: "Black",           code: "2025", hex: "#1A1A1A",                     common: true  },
-  // Specialty
-  { name: "Neon Green",      code: "9092", hex: "#39FF14", translucent: true                 },
-  { name: "Neon Pink",       code: "9094", hex: "#FF6EC7", translucent: true                 },
+  // ── Common (shown first) ──────────────────────────────────────────────────
+  { name: "White",          code: "7328", hex: "#F2F2F0", finish: "translucent", common: true },
+  { name: "White",          code: "2447", hex: "#F8F8F8", finish: "opaque",      common: true },
+  { name: "Black",          code: "2025", hex: "#1A1A1A", finish: "opaque",      common: true },
+  { name: "Red",            code: "2283", hex: "#D41A1A", finish: "translucent", common: true },
+  { name: "Blue",           code: "2114", hex: "#1E50B4", finish: "translucent", common: true },
+  { name: "Green",          code: "2108", hex: "#228B22", finish: "translucent", common: true },
+  { name: "Yellow",         code: "2037", hex: "#F5C400", finish: "translucent", common: true },
+  { name: "Orange",         code: "2119", hex: "#E86020", finish: "translucent", common: true },
+  // ── Extended palette ──────────────────────────────────────────────────────
+  { name: "Deep Red",       code: "2793", hex: "#8B0000", finish: "translucent" },
+  { name: "Ivory",          code: "2146", hex: "#F4ECD4", finish: "translucent" },
+  { name: "Gray",           code: "2074", hex: "#8A8A8A", finish: "opaque"      },
+  { name: "White",          code: "7508", hex: "#FAFAF8", finish: "translucent" },
+  { name: "Bronze",         code: "2370", hex: "#6B4226", finish: "transparent" },
+  { name: "Glass Green",    code: "3030", hex: "#4A8060", finish: "transparent" },
+  { name: "Clear",          code: "CLEAR",hex: "#E8F4F8", finish: "transparent" },
+  { name: "Clear Matte",    code: "P-95", hex: "#D8E8EC", finish: "matte"       },
 ]
 
-export const DEFAULT_ACRYLIC_COLOR = ACRYLIC_COLORS.find(c => c.code === "2447")! // White
+export const DEFAULT_ACRYLIC_COLOR = ACRYLIC_COLORS.find(c => c.code === "7328")! // White translucent
 
 // ─── Channel Letter Lighting ──────────────────────────────────────────────────
 

@@ -4,7 +4,7 @@
 
 export type BrandMode = "text-only" | "logo-only" | "logo-and-text"
 
-export interface PromptColor { name: string; code: string; hex: string; translucent?: boolean }
+export interface PromptColor { name: string; code: string; hex: string; finish?: "translucent" | "opaque" | "transparent" | "matte" }
 
 export interface SignPromptParams {
   businessName: string
@@ -75,8 +75,13 @@ function colorClause(p: SignPromptParams): string {
     return face + bg
   }
   if (p.material === "acrylic" && p.acrylic) {
-    const trans = p.acrylic.translucent ? "translucent" : "opaque"
-    return `The letter faces are ${trans} acrylic in ${p.acrylic.name} (approx ${p.acrylic.hex}).`
+    const finish = p.acrylic.finish ?? "translucent"
+    const finishDesc =
+      finish === "translucent"  ? "translucent Dura-Cast® acrylic glowing with internal LED illumination" :
+      finish === "opaque"       ? "opaque Dura-Cast® acrylic (solid, no light transmission)" :
+      finish === "transparent"  ? "transparent tinted Dura-Cast® acrylic (see-through)" :
+                                  "matte-finish Dura-Cast® acrylic with a diffused non-gloss surface"
+    return `The letter faces are ${finishDesc} in ${p.acrylic.name} (approx ${p.acrylic.hex}).`
   }
   return `Letter/face color: ${p.primaryColor ?? "brushed aluminum"}.`
 }

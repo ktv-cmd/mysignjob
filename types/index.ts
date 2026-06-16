@@ -99,7 +99,7 @@ export interface SignSpec {
   // Channel letter material details
   panel_face_color?: { name: string; code: string; hex: string }   // Dura-Bond ACP face
   panel_bg_color?: { name: string; code: string; hex: string }     // Dura-Bond ACP background
-  acrylic_color?: { name: string; code: string; hex: string; translucent?: boolean }
+  acrylic_color?: { name: string; code: string; hex: string; finish: "translucent" | "opaque" | "transparent" | "matte" }
   channel_lighting?: { type: string; return_glow?: string }
 }
 
