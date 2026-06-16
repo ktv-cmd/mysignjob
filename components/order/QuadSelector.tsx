@@ -55,6 +55,13 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false }:
     const img = new Image()
     img.onload = () => {
       imgRef.current = img
+      // Match the canvas to the photo's real aspect ratio so it isn't squished.
+      const canvas = canvasRef.current
+      if (canvas && img.naturalWidth && img.naturalHeight) {
+        const W = 960
+        canvas.width = W
+        canvas.height = Math.round(W * (img.naturalHeight / img.naturalWidth))
+      }
       draw()
     }
     img.src = imageDataUrl
