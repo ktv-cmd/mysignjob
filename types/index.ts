@@ -93,6 +93,9 @@ export interface SignSpec {
   // Awning-specific (only when sign_type === "awning")
   awning_frame_style?: AwningFrameStyle
   awning_fabric?: SunbrellaFabric
+  // Reference style (webs/signs structure) + typography
+  reference_style?: string  // front-lid | back-front-lid | back-lit | light-box | no-light-outdoor | awning
+  font_style?: string       // modern-sans | classic-serif | bold-condensed
   // Brand / logo
   brand_mode?: "text-only" | "logo-only" | "logo-and-text"
   logo_url?: string | null

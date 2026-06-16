@@ -5,39 +5,73 @@ export const maxDuration = 180
 
 const SIGN_SYSTEM_INSTRUCTION = `
 # ROLE
-You are a Senior Architectural Signage Visualization Architect rendering a photorealistic sign mockup.
+You are a Senior Architectural Signage Visualization Architect. You manage two layers of logic:
+1. STRUCTURAL LAYER (The 'What'): Defines the Signage Case.
+2. PHYSICS LAYER (The 'How'): Defines the geometric construction and material properties.
 
-## MASK ERASURE PROTOCOL (Critical)
-The golden zone (#FFD740) marks where the new sign goes. Execute in order:
-1. IDENTIFY all gold/yellow pixels in the image.
-2. ERASE the golden mask completely — restore the underlying building surface (brick, stucco, wood, paint) by inpainting the facade texture.
-3. INSERT the new sign as a physical 3D structure bolted to the restored wall.
+This is VOLUMETRIC SCENE RECONSTRUCTION (Blender/3ds Max logic), not texture inpainting (Photoshop logic).
 
-## SIGN GEOMETRY
-- Sign dimensions MUST fill the full golden zone bounding box — never smaller.
-- Corners are always hard 90-degree right angles — never rounded.
-- Show 3.5" (89mm) Z-axis depth on all sign types (return walls visible from camera angle).
-- ZERO GOLD POLICY: final output has 0% gold pixels.
+IMPORTANT: Create ORIGINAL custom fabrication designs. Do not replicate existing branded signage.
 
-## MATERIALS & LIGHTING (PBR)
-- Brushed aluminum returns: Metallic 0.95, Roughness 0.35
-- Illuminated acrylic faces: IOR 1.49, subsurface scattering 2mm radius
-- Non-illuminated: matte painted metal, shadow from ambient occlusion only
-- Back-lit halo: inverse-square falloff light wash on wall behind sign
-- Contact shadow where sign meets wall
+═══════════════════════════════════════════════════════════════════════════
+LAYER 2: PHYSICS & CONSTRUCTION RULES (THE 'HOW')
+═══════════════════════════════════════════════════════════════════════════
 
-## COLOR
-- If a hex color is specified, use it EXACTLY on letter faces — non-negotiable.
-- Never use the golden guide color (#FFD740) as a sign color.
+## MASK ERASURE PROTOCOL (Critical):
+The golden zone (#FFD740) is a VOLUMETRIC VOID marking construction coordinates. It is TEMPORARY and must be 100% erased.
+
+EXECUTION SEQUENCE:
+1. IDENTIFY MASK: Locate all gold/yellow pixels (#FFD740 ±10% tolerance) in Image 1.
+2. SURFACE RESTORATION: FIRST completely erase the golden mask and RECONSTRUCT the underlying building surface texture (brick pattern, mortar lines, wood grain, stucco relief, paint color). INPAINT/RESTORE across the entire golden zone as if the mask never existed.
+3. GEOMETRIC INSERTION: NOW insert the extruded 3D sign mesh onto the restored surface as a physical structure bolted to the wall.
+4. COVERAGE: SIGN DIMENSIONS = ZONE DIMENSIONS (non-negotiable). The sign's width/height must exactly match the golden zone's bounding box; scale up if needed so coverage is 100%.
+5. ZERO GOLD POLICY: Final output = 0% gold/yellow pixels — either covered by the sign OR restored to facade texture.
+6. CORNER GEOMETRY (non-negotiable): The selection brush may have rounded/soft edges — a painting artifact only. The sign's corners and edges are ALWAYS hard 90-degree right angles. Never round sign geometry.
+
+## GEOMETRY ENFORCEMENT (Forces 3D Depth):
+- Use terms: "Extruded," "Volumetric Mesh," "Z-axis protrusion".
+- Exact depth: 3.5 inches (89mm) perpendicular to the wall's surface normal.
+- Return planes (sides) must be visible to prove 3D depth. Each element has measurable thickness — NOT flat textures.
+
+## MATERIAL SHADERS (PBR):
+- Brushed Aluminum returns: Metallic 0.95, Roughness 0.35, Anisotropy 0.6 (directional grain).
+- Acrylic faces (illuminated): IOR 1.49, transmission for light passage, subsurface scattering (2mm) for internal glow.
+- Painted metal: client HEX, Metallic 0.0, Roughness 0.4–0.6.
+
+## LIGHTING & EMISSION:
+IF 'NO LIGHT': PROHIBITED — glow, bloom, halo, neon, luminescence, LED, backlight. REQUIRED — matte surfaces, hard contact shadows (Ambient Occlusion), sun-lit/daylight only, opaque solid materials, zero emission, external environmental lighting only.
+IF ILLUMINATED: Ray-traced PBR — Front-lit: subsurface scattering through acrylic faces + edge glow. Back-lit: ray-traced light wash on wall BEHIND sign with inverse-square falloff, NO face glow. Combined: both effects.
+
+## COLOR INTEGRITY:
+- LOGO PROVIDED (Image 2): use exact HEX/Pantone from the logo — non-negotiable brand identity.
+- LOGO + NAME: sample the dominant HEX from the logo and apply it EXACTLY to the name letterforms (direct HEX transfer, no adjustment).
+- TEXT WITH CLIENT COLOR: if a hex is specified, use it EXACTLY on faces and returns.
+- TEXT WITHOUT COLOR: analyze the facade and pick complementary finishes (brushed aluminum #A9A9A9, stainless #C0C0C0, matte black #1C1C1C, bronze #CD7F32).
+- NEVER use the golden guide color (#FFD740) as a sign color.
+
+═══════════════════════════════════════════════════════════════════════════
+LAYER 1: STRUCTURAL RULES (THE CASES)
+═══════════════════════════════════════════════════════════════════════════
+
+CASE A (LOGO ONLY): Construct as a 3D CABINET LIGHTBOX MESH — translucent front face + 4 aluminum return walls + back mounting plate, 3.5" Z-extrusion. Extract EXACT colors from the logo. FULL-BLEED FACE: the logo's background color floods 100% of the face edge-to-edge — no raw white acrylic, no margins.
+
+CASE B (NAME ONLY): Construct as EXTRUDED 3D CHANNEL LETTERFORMS — each letter a 6-faced primitive (front face + 4 returns + back), 3.5" depth. If a font style is specified, follow that exact typographic direction. If a HEX is specified, use it exactly.
+
+CASE C (LOGO + NAME): UNIFIED BRANDING — logo as Case A cabinet, name as Case B channel letters, both at the same 3.5" Z-depth. Sample dominant HEX from the logo and apply to the name for unified identity. Layout horizontal or vertical based on the golden zone's aspect ratio.
+
+AWNING OVERRIDE (when an awning is requested): render a curved FABRIC awning — NO 3D boxes, NO metal returns. Single soft curved fabric mesh on a powder-coated aluminum frame with wall brackets. Apply logo/text as flat 2D ink print warping with the fabric's curves (no 3D lettering thickness). Natural daylight unless internal backlighting is specified.
+
+## VALIDATION CHECKLIST:
+1. SIDE-WALL TEST: at least one letter's return plane visible (proves 3D extrusion).
+2. ZERO GOLD: no gold pixels remain.
+3. SURFACE CONTINUITY: exposed wall areas show seamless texture restoration.
+4. SHADOW AUTHENTICITY: multi-plane contact shadows prove geometric depth.
 
 ## OUTPUT
-One photorealistic 16:9 render with the sign physically integrated into the building facade.
+One ray-traced PBR render (16:9) with the sign physically integrated into the building facade.
 `.trim()
 
-type SignType = "flat_cut" | "channel_letters" | "cabinet" | "blade" | "window_vinyl" | "monument" | "pylon" | "awning" | "other"
 type BrandMode = "text-only" | "logo-only" | "logo-and-text"
-
-const PREVIEW_SUPPORTED: SignType[] = ["flat_cut", "channel_letters", "cabinet", "blade", "window_vinyl", "monument", "pylon", "awning", "other"]
 
 type Part = { text: string } | { inlineData: { mimeType: string; data: string } }
 
@@ -141,39 +175,32 @@ export async function POST(req: NextRequest) {
     const body = await req.json() as {
       imageDataUrl: string
       quad: { x: number; y: number }[]
-      signType: SignType
+      referenceId: string
+      lightingType?: "front" | "back" | "both"
       businessName: string
-      primaryColor: string
-      illumination: string
       brandMode?: BrandMode
       logoDataUrl?: string
+      fontStyle?: "modern-sans" | "classic-serif" | "bold-condensed"
+      letterColor?: string
       awningFrame?: string
       fabricName?: string
-      material?: string
+      awningIllumination?: string
       panelFace?: PromptColor | null
       panelBg?: PromptColor | null
       acrylic?: PromptColor | null
-      lightType?: string
-      returnGlow?: string
       count?: number
     }
 
     const {
-      imageDataUrl, quad, signType, businessName, primaryColor, illumination,
-      brandMode = "text-only", logoDataUrl, awningFrame, fabricName,
-      material, panelFace, panelBg, acrylic, lightType, returnGlow,
+      imageDataUrl, quad, referenceId = "front-lid", lightingType, businessName,
+      brandMode = "text-only", logoDataUrl, fontStyle, letterColor,
+      awningFrame, fabricName, awningIllumination,
+      panelFace, panelBg, acrylic,
       count = 3,
     } = body
 
     if (!imageDataUrl || !quad || (quad.length !== 4 && quad.length !== 6))
       return NextResponse.json({ error: "imageDataUrl and 4- or 6-point quad required" }, { status: 400 })
-
-    if (!PREVIEW_SUPPORTED.includes(signType)) {
-      return NextResponse.json({
-        error: `AI preview is not available for ${signType.replace("_", " ")} signs in v1.`,
-        skipped: true,
-      }, { status: 200 })
-    }
 
     const apiKey = process.env.GEMINI_API_KEY
     if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 })
@@ -223,9 +250,11 @@ export async function POST(req: NextRequest) {
     }
 
     const prompt = buildSignPrompt({
-      businessName, signType, primaryColor, illumination, brandMode, hasLogo,
-      material, panelFace, panelBg, acrylic, lightType, returnGlow,
-      awningFrame, fabricName, isCorner, foldXPct,
+      businessName, brandMode, hasLogo,
+      referenceId, lightingType, fontStyle, letterColor,
+      panelFace, panelBg, acrylic,
+      awningFrame, fabricName, awningIllumination,
+      isCorner, foldXPct,
     })
 
     const genCount = Math.min(Math.max(1, count), 3)

@@ -1,6 +1,11 @@
 // Shared sign-preview prompt builder — used by BOTH the client (to display the
 // prompt before generating) and the API route (to actually call Gemini), so the
 // two never drift apart.
+//
+// Structure ported from webs/signs (reference-style driven, 3 brand cases),
+// extended to keep my-sign-job's Dura-Bond ACP / Dura-Cast acrylic color systems.
+
+import { getFontDescription, getFontPhrase, type FontStyle } from "@/lib/sign-references"
 
 export type BrandMode = "text-only" | "logo-only" | "logo-and-text"
 
@@ -8,73 +13,49 @@ export interface PromptColor { name: string; code: string; hex: string; finish?:
 
 export interface SignPromptParams {
   businessName: string
-  signType: string
   brandMode: BrandMode
   hasLogo: boolean
-  // material / colors
-  material?: string
-  primaryColor?: string                 // fallback for vinyl/steel/wood/other
+  // ── reference style (primary signage selector, from webs/signs) ──
+  referenceId: string                   // front-lid | back-front-lid | back-lit | light-box | no-light-outdoor | awning
+  lightingType?: "front" | "back" | "both"
+  // ── typography (name-only / logo+name) ──
+  fontStyle?: FontStyle
+  letterColor?: string                  // hex chosen by client OR extracted from logo
+  // ── material colors (kept from my-sign-job) ──
   panelFace?: PromptColor | null        // Dura-Bond ACP letter face (aluminum)
   panelBg?: PromptColor | null          // Dura-Bond ACP backer panel (aluminum)
-  acrylic?: PromptColor | null          // acrylic face color (acrylic)
-  // lighting (non-awning channel letters)
-  lightType?: string                    // none | front | halo | front_halo | neon
-  returnGlow?: string                   // back_only | subtle_side | half_side | full_side
-  // awning
+  acrylic?: PromptColor | null          // Dura-Cast acrylic face (acrylic)
+  // ── awning ──
   awningFrame?: string
   fabricName?: string
-  illumination?: string                 // awning illumination
-  // corner
+  awningIllumination?: string           // none | internal_led
+  // ── corner ──
   isCorner?: boolean
   foldXPct?: number
 }
 
-const SIGN_DESC: Record<string, string> = {
-  flat_cut: "flat-cut dimensional letters mounted to the facade",
-  channel_letters: "3D illuminated channel letter sign",
-  cabinet: "illuminated lightbox cabinet sign",
-  blade: "blade sign mounted perpendicular to the facade",
-  window_vinyl: "vinyl graphic lettering applied to the window glass",
-  monument: "ground-mounted monument sign in front of the building",
-  pylon: "tall freestanding pylon pole sign visible from the street",
-  awning: "fabric awning sign",
-  other: "custom dimensional sign",
-}
-
-const RETURN_GLOW_DESC: Record<string, string> = {
-  back_only:   "the glow stays on the back wall only (classic halo) with opaque letter returns",
-  subtle_side: "the glow wraps subtly onto the letter returns (sides)",
-  half_side:   "the glow illuminates roughly half the depth of the letter returns",
-  full_side:   "the entire letter return is illuminated for a full wraparound glow",
-}
-
-function lightingClause(lightType?: string, returnGlow?: string): string {
-  switch (lightType) {
-    case "none":  return "no artificial illumination — natural daylight shadows only"
-    case "front": return "front-lit — the letter faces glow evenly with internal LED illumination"
-    case "halo":  return `halo back-lit — LEDs behind the letters cast a glow onto the wall; ${RETURN_GLOW_DESC[returnGlow ?? "back_only"]}`
-    case "front_halo": return `both front-lit glowing faces AND a back-lit halo glow on the wall behind; ${RETURN_GLOW_DESC[returnGlow ?? "back_only"]}`
-    case "neon":  return "exposed neon tube lighting outlining the letters"
-    default:      return "front-lit with internal LED illumination"
+// ─── Lighting description (channel letters) ───────────────────────────────────
+function lightingDescription(lightingType?: string): string {
+  const map: Record<string, string> = {
+    front: "front-lit illumination — glowing letter faces with internal LED, edge-glow from acrylic refraction",
+    back: "back-lit halo illumination — LED glow washing onto the wall behind the letters (inverse-square falloff), opaque faces",
+    both: "both front-lit glowing faces AND a back-lit halo glow on the wall behind",
   }
+  return map[lightingType ?? "front"] ?? "professional illumination"
 }
 
+// ─── Color clause — brand mode + material color systems ───────────────────────
 function colorClause(p: SignPromptParams): string {
+  // CASE A — logo only: colors come straight from the logo file
   if (p.brandMode === "logo-only") {
-    return "The colors must match exactly the logo provided in Image 2."
+    return "The colors must match exactly the logo provided in Image 2 (non-negotiable brand identity)."
   }
+  // CASE C — logo + name: sample dominant color from logo, apply to the name text
   if (p.brandMode === "logo-and-text" && p.hasLogo) {
-    return "Letter/face color: extract the dominant color from the logo in Image 2 and use it for the text. The logo must retain its exact original colors."
+    return "Sample the dominant HEX color from the logo in Image 2 and apply it EXACTLY to the name letterforms for unified brand identity. The logo must retain its exact original colors."
   }
-  // Material-driven
-  if (p.material === "aluminum" && p.panelFace) {
-    const face = `The letter faces are Dura-Bond aluminum composite in ${p.panelFace.name} (approx ${p.panelFace.hex}).`
-    const bg = p.panelBg
-      ? ` The backer/background panel behind the letters is Dura-Bond aluminum composite in ${p.panelBg.name} (approx ${p.panelBg.hex}).`
-      : ""
-    return face + bg
-  }
-  if (p.material === "acrylic" && p.acrylic) {
+  // CASE B — name only: prefer a specific material color, else the chosen letter color
+  if (p.acrylic) {
     const finish = p.acrylic.finish ?? "translucent"
     const finishDesc =
       finish === "translucent"  ? "translucent Dura-Cast® acrylic glowing with internal LED illumination" :
@@ -83,12 +64,46 @@ function colorClause(p: SignPromptParams): string {
                                   "matte-finish Dura-Cast® acrylic with a diffused non-gloss surface"
     return `The letter faces are ${finishDesc} in ${p.acrylic.name} (approx ${p.acrylic.hex}).`
   }
-  return `Letter/face color: ${p.primaryColor ?? "brushed aluminum"}.`
+  if (p.panelFace) {
+    const face = `The letter faces are Dura-Bond aluminum composite in ${p.panelFace.name} (approx ${p.panelFace.hex}).`
+    const bg = p.panelBg
+      ? ` The backer/background panel behind the letters is Dura-Bond aluminum composite in ${p.panelBg.name} (approx ${p.panelBg.hex}).`
+      : ""
+    return face + bg
+  }
+  if (p.letterColor) {
+    return `The letters should be ${p.letterColor}.`
+  }
+  return "The letters should complement the building's color palette — brushed aluminum, matte black, or bronze."
+}
+
+// ─── Awning color rules (ported from webs/signs getAwningColorDescription) ─────
+function awningColorClause(p: SignPromptParams): string {
+  if (p.brandMode === "text-only") {
+    const awningColor = p.fabricName ? `${p.fabricName}` : (p.letterColor || "a rich, professional color that complements the building")
+    return [
+      `AWNING COLOR: The awning fabric must be ${awningColor}.`,
+      `TEXT COLOR: The business name text must be white or cream — a clean, neutral color that stands out clearly against the colored awning fabric.`,
+      `The contrast between the colored awning and white text should be sharp and highly legible.`,
+    ].join(" ")
+  }
+  if (p.brandMode === "logo-only") {
+    return [
+      `AWNING COLOR: Analyze the logo in Image 2 and choose an awning fabric color that complements and harmonizes with the logo's color palette.`,
+      `The awning should feel like a natural extension of the brand.`,
+      `LOGO COLORS: The logo must retain its exact original colors from Image 2.`,
+    ].join(" ")
+  }
+  return [
+    `AWNING COLOR: ${p.fabricName ? `The awning fabric is ${p.fabricName}, chosen to harmonize with the logo.` : "Analyze the logo in Image 2 and choose an awning fabric color that complements the logo's palette."}`,
+    `LOGO COLORS: The logo must retain its exact original colors from Image 2.`,
+    `TEXT COLOR: The business name text should be white or cream — clean and neutral, contrasting well with the awning and complementing the logo.`,
+  ].join(" ")
 }
 
 export function buildSignPrompt(p: SignPromptParams): string {
   const cornerClause = p.isCorner && p.foldXPct != null
-    ? ` This is a WRAPAROUND CORNER SIGN that bends around the building's vertical corner edge at approximately ${p.foldXPct.toFixed(0)}% across the golden zone. The sign must follow the building corner: the front face covers the left portion and the side face (angled away) covers the right portion, with the business name readable on both faces. Each face catches light differently due to the angle.`
+    ? ` This is a WRAPAROUND CORNER SIGN that bends around the building's vertical corner edge at approximately ${p.foldXPct.toFixed(0)}% across the golden zone. The front face covers the left portion and the side face (angled away) covers the right portion, with the business name readable on both faces.`
     : ""
 
   const contentDesc = p.brandMode === "logo-only"
@@ -103,54 +118,57 @@ export function buildSignPrompt(p: SignPromptParams): string {
       : `Image 1: storefront — gold/yellow shows where new signage goes. Image 2: supplied logo — pair with the business name per the text instructions.`
     : ""
 
-  // ── Awning branch ──
-  if (p.signType === "awning") {
-    const awningLightDesc: Record<string, string> = {
-      none: "natural daylight only, no artificial lighting on the awning",
-      internal_led: "the awning fabric is internally backlit — LED strips are mounted inside the frame, making the translucent fabric glow warmly from within at night",
-    }
+  // ── Awning ──
+  if (p.referenceId === "awning") {
     const framePhrase = p.awningFrame ?? "classic slope shed awning"
-    const fabricDesc = p.fabricName
-      ? `in ${p.fabricName} Sunbrella® acrylic fabric`
-      : `in a solid commercial-grade awning fabric (color: ${p.primaryColor})`
-    const awningLight = awningLightDesc[p.illumination ?? "none"] ?? awningLightDesc["none"]
-
-    const awningColorDesc = p.brandMode === "logo-only" || p.brandMode === "logo-and-text"
-      ? [
-          `AWNING COLOR: Analyze the logo in Image 2 and choose an awning fabric color that complements and harmonizes with the logo's color palette. The awning should feel like a natural extension of the brand.`,
-          `LOGO COLORS: The logo must retain its exact original colors from Image 2.`,
-          p.brandMode === "logo-and-text" ? `TEXT COLOR: The business name text should be white or cream — a clean, neutral color that contrasts well with the awning and complements the logo.` : "",
-        ].filter(Boolean).join(" ")
-      : [
-          `AWNING COLOR: The awning fabric must be ${p.primaryColor}.`,
-          `TEXT COLOR: The business name text must be white or cream — a clean, neutral color that stands out clearly against the colored awning fabric.`,
-        ].join(" ")
-
+    const lit = p.awningIllumination === "internal_led"
+      ? "The awning fabric is internally backlit — LED strips inside the frame make the translucent fabric glow warmly from within at night."
+      : "Use natural daylight only — no artificial glow or internal illumination."
     return [
       `Generate a photorealistic architectural photo of the storefront.`,
-      `Inside the golden highlighted area, install a professional fabric storefront awning`,
-      `with a ${framePhrase} profile, ${fabricDesc}.`,
-      `The sign displays ${contentDesc}.`,
-      awningColorDesc,
-      `Lighting: ${awningLight}.`,
-      `The awning must be physically mounted to the building fascia — no floating.`,
-      `Completely replace the golden highlighted area with this awning,`,
-      `restoring the original wall texture in any exposed areas around it.`,
+      `Inside the golden highlighted area, install a professional fabric storefront awning with a ${framePhrase} profile that clearly displays ${contentDesc}.`,
+      `The awning must be heavyweight canvas fabric with natural draping and visible texture; graphics appear screen-printed or vinyl-applied onto the fabric, following its curves.`,
+      awningColorClause(p),
+      lit,
+      `The awning must be anchored to the building with a visible metal frame — do not let it float.`,
+      `Completely replace the golden highlighted area with this awning, restoring the original wall texture around it.`,
       cornerClause,
       imageSlotDesc,
     ].filter(Boolean).join(" ")
   }
 
-  // ── Non-awning (channel letters / flat cut / etc.) ──
+  // ── Light box / cabinet ──
+  if (p.referenceId === "light-box") {
+    return [
+      `Generate a photorealistic architectural photo of the storefront.`,
+      `Inside the golden highlighted area, place a new high-end illuminated light box cabinet sign that clearly displays ${contentDesc}.`,
+      `The sign is a sleek aluminum cabinet with a translucent acrylic face panel and visible depth (3.5" / 89mm), crisp edges, and internal LED illumination creating an even, soft glow.`,
+      colorClause(p),
+      `The cabinet must be physically mounted to the wall with visible brackets — do not let it float, and cast realistic contact shadows.`,
+      `Completely replace the golden highlighted area with this new signage, restoring the wall texture around it.`,
+      cornerClause,
+      imageSlotDesc,
+    ].filter(Boolean).join(" ")
+  }
+
+  // ── Channel letters (front / back / both / no-light) ──
+  const noLight = p.referenceId === "no-light-outdoor"
+  const fontPhrase = (p.brandMode !== "logo-only") ? getFontPhrase(p.fontStyle) : ""
+  const fontDirective = (p.brandMode !== "logo-only" && p.fontStyle)
+    ? ` Typography: ${getFontDescription(p.fontStyle)}`
+    : ""
+  const lightSentence = noLight
+    ? `The sign has NO artificial illumination — matte/brushed finishes, hard sun-lit contact shadows, and bold 3.5" (89mm) geometric depth for impact.`
+    : `The sign must have ${lightingDescription(p.lightingType)}.`
+
   return [
     `Generate a photorealistic architectural photo of the storefront.`,
-    `Inside the area marked by the golden highlight, place a new professional ${SIGN_DESC[p.signType] ?? "sign"}`,
-    `that clearly displays ${contentDesc}.`,
+    `Inside the golden highlighted area, place new high-end dimensional 3D channel letters${fontPhrase} that clearly read ${contentDesc}.`,
     colorClause(p),
-    `Lighting: ${lightingClause(p.lightType, p.returnGlow)}.`,
-    `The sign must be physically mounted to the wall — do not let it float.`,
-    `Completely replace the golden highlighted area with this new signage,`,
-    `restoring the original wall texture in any exposed areas around the sign.`,
+    lightSentence,
+    fontDirective,
+    `Ensure the signage is physically mounted to the wall with visible hardware — do not let it float; letter return planes (sides) must be visible to prove 3D depth.`,
+    `Completely replace the golden highlighted area with this new signage, restoring the wall texture around it.`,
     cornerClause,
     imageSlotDesc,
   ].filter(Boolean).join(" ")

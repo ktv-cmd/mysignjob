@@ -6,12 +6,16 @@ import PhotoUpload from "@/components/order/PhotoUpload"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
 import { formatDimensions } from "@/lib/utils"
-import type { SignType, SignMaterial, IlluminationType, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
+import type { IlluminationType, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
 import {
-  DURABOND_COLORS, ACRYLIC_COLORS, LIGHT_TYPES, RETURN_GLOW_OPTS,
+  DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
-  type PanelColor, type AcrylicColor, type LightType, type ReturnGlow,
+  type PanelColor, type AcrylicColor,
 } from "@/lib/sign-colors"
+import {
+  REFERENCE_STYLES, DEFAULT_REFERENCE, FONT_OPTIONS, getSpecMapping,
+  type FontStyle,
+} from "@/lib/sign-references"
 import { buildSignPrompt, type SignPromptParams } from "@/lib/sign-prompt"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
@@ -37,35 +41,9 @@ interface SizeResult {
   reasoning: string
 }
 
-const SIGN_TYPES: { value: SignType; label: string }[] = [
-  { value: "channel_letters", label: "3D Channel Letters" },
-  { value: "cabinet",         label: "Lightbox / Cabinet" },
-  { value: "flat_cut",        label: "Flat Cut Letters" },
-  { value: "blade",           label: "Blade Sign" },
-  { value: "window_vinyl",    label: "Window Graphics" },
-  { value: "monument",        label: "Monument Sign" },
-  { value: "pylon",           label: "Pylon / Pole Sign" },
-  { value: "awning",          label: "Fabric Awning" },
-]
-
-const ILLUMINATION_OPTS: { value: IlluminationType; label: string }[] = [
-  { value: "none",         label: "No lighting (day only)" },
-  { value: "internal_led", label: "Front-lit LED (glowing faces)" },
-  { value: "halo",         label: "Back-lit halo glow" },
-  { value: "external",     label: "External floodlight" },
-]
-
 const AWNING_LIGHTING: { value: IlluminationType; label: string; desc: string }[] = [
   { value: "none",         label: "No Lighting",             desc: "Daytime only, no illumination" },
   { value: "internal_led", label: "Backlit (interior light)", desc: "Fabric glows from inside the frame at night" },
-]
-
-const MATERIAL_OPTS: { value: SignMaterial; label: string }[] = [
-  { value: "aluminum", label: "Aluminum" },
-  { value: "acrylic",  label: "Acrylic" },
-  { value: "vinyl",    label: "Vinyl" },
-  { value: "steel",    label: "Steel" },
-  { value: "wood",     label: "Wood" },
 ]
 
 // ── Awning frame styles (industry standard — most common is "standard" shed slope)
@@ -208,69 +186,6 @@ function AwningFrameIcon({ style, active }: { style: AwningFrameStyle; active: b
   )
 }
 
-// ── Channel letter lighting type icon (cross-section of a letter) ──────────
-function LightTypeIcon({ type, active }: { type: LightType; active: boolean }) {
-  const c = active ? "#2563eb" : "#6b7280"
-  const lc = active ? "#93c5fd" : "#d1d5db"
-  // Letter cross-section: outer rect = return, inner = face, glow dots show emission
-  return (
-    <svg width="40" height="28" viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Wall */}
-      <rect x="0" y="20" width="40" height="4" rx="1" fill={lc} />
-      {/* Letter return (side wall) */}
-      <rect x="8" y="6" width="24" height="14" rx="2" fill="none" stroke={c} strokeWidth="1.5" />
-      {/* Letter face */}
-      <rect x="8" y="4" width="24" height="4" rx="1" fill={c} />
-      {/* Front glow (front / front_halo) */}
-      {(type === "front" || type === "front_halo") && (
-        <ellipse cx="20" cy="2" rx="8" ry="2" fill={lc} opacity="0.9" />
-      )}
-      {/* Halo glow on wall (halo / front_halo) */}
-      {(type === "halo" || type === "front_halo") && (
-        <ellipse cx="20" cy="22" rx="12" ry="2" fill={lc} opacity="0.8" />
-      )}
-      {/* Neon squiggle */}
-      {type === "neon" && (
-        <path d="M10 11 Q15 7 20 11 Q25 15 30 11" stroke="#f59e0b" strokeWidth="1.5" fill="none" strokeLinecap="round" />
-      )}
-      {/* No light X */}
-      {type === "none" && (
-        <g opacity="0.4">
-          <line x1="12" y1="8" x2="28" y2="18" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
-          <line x1="28" y1="8" x2="12" y2="18" stroke={c} strokeWidth="1.5" strokeLinecap="round" />
-        </g>
-      )}
-    </svg>
-  )
-}
-
-// ── Return glow depth icon (letter cross-section showing return fill) ────────
-function ReturnGlowIcon({ glow, active }: { glow: ReturnGlow; active: boolean }) {
-  const c  = active ? "#2563eb" : "#6b7280"
-  const lc = active ? "#93c5fd" : "#d1d5db"
-  // Side depth fill amounts
-  const fills: Record<ReturnGlow, number> = {
-    back_only: 0, subtle_side: 4, half_side: 7, full_side: 14,
-  }
-  const fill = fills[glow]
-  return (
-    <svg width="40" height="28" viewBox="0 0 40 28" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Wall */}
-      <rect x="0" y="20" width="40" height="4" rx="1" fill={lc} />
-      {/* Return fill (glow on side) */}
-      {fill > 0 && (
-        <rect x="8" y={20 - fill} width="24" height={fill} rx="1" fill={lc} opacity="0.7" />
-      )}
-      {/* Letter return border */}
-      <rect x="8" y="6" width="24" height="14" rx="2" fill="none" stroke={c} strokeWidth="1.5" />
-      {/* Letter face */}
-      <rect x="8" y="4" width="24" height="4" rx="1" fill={c} />
-      {/* Halo glow on wall */}
-      <ellipse cx="20" cy="22" rx="12" ry="2" fill={lc} opacity="0.8" />
-    </svg>
-  )
-}
-
 // ── Dura-Bond / panel color picker (reusable for face + bg) ─────────────────
 function PanelColorPicker({
   label, subtitle, selected, onSelect, visible, showAll, onToggleAll, total,
@@ -352,31 +267,39 @@ export default function NewOrderPage() {
   const [submitError, setSubmitError] = useState<string | null>(null)
 
   // Sign spec fields
-  const [signType, setSignType] = useState<SignType>("channel_letters")
+  // ── Primary signage selector: reference style (webs/signs structure) ──
+  const [referenceId, setReferenceId] = useState<string>(DEFAULT_REFERENCE.id)
+  const [fontStyle, setFontStyle] = useState<FontStyle>("modern-sans")
   const [businessName, setBusinessName] = useState("")
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
-  const [primaryColor, setPrimaryColor] = useState("#1C1C1C")
+  const [primaryColor, setPrimaryColor] = useState("#1C1C1C") // letter color
   const [secondaryColor, setSecondaryColor] = useState("")
-  const [material, setMaterial] = useState<SignMaterial>("aluminum")
-  const [illumination, setIllumination] = useState<IlluminationType>("none")
   const [notes, setNotes] = useState("")
   // Awning-specific
   const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("standard")
   const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
+  const [awningIllumination, setAwningIllumination] = useState<IlluminationType>("none")
   const [showAllColors, setShowAllColors] = useState(false)
   // Corner / wraparound sign
   const [isCorner, setIsCorner] = useState(false)
-  // Dura-Bond ACP colors (aluminum material)
+  // Dura-Bond ACP colors (aluminum / no-light style)
   const [panelFaceColor, setPanelFaceColor] = useState<PanelColor>(DEFAULT_PANEL_FACE_COLOR)
   const [panelBgColor, setPanelBgColor] = useState<PanelColor>(DEFAULT_PANEL_BG_COLOR)
   const [showAllPanelFace, setShowAllPanelFace] = useState(false)
   const [showAllPanelBg, setShowAllPanelBg] = useState(false)
-  // Acrylic color
+  // Dura-Cast acrylic color
   const [acrylicColor, setAcrylicColor] = useState<AcrylicColor>(DEFAULT_ACRYLIC_COLOR)
   const [showAllAcrylic, setShowAllAcrylic] = useState(false)
-  // Channel letter lighting
-  const [lightType, setLightType] = useState<LightType>("front")
-  const [returnGlow, setReturnGlow] = useState<ReturnGlow>("back_only")
+
+  // ── Derived from the selected reference style ──
+  const selectedReference = REFERENCE_STYLES.find(r => r.id === referenceId) ?? DEFAULT_REFERENCE
+  const mapping = getSpecMapping(referenceId)
+  const signType = mapping.signType
+  const material = mapping.material
+  const colorSystem = mapping.colorSystem
+  const isAwning = referenceId === "awning"
+  const lightingType = selectedReference.lightingType
+  const illumination: IlluminationType = isAwning ? awningIllumination : mapping.illumination
 
   const stepIdx = STEPS.indexOf(step)
 
@@ -439,19 +362,18 @@ export default function NewOrderPage() {
     const foldXPct = isCornerQuad && quad ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined
     return {
       businessName,
-      signType,
       brandMode,
       hasLogo: !!logoDataUrl,
-      material,
-      primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
-      panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
-      panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : null,
-      acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
-      lightType,
-      returnGlow,
-      awningFrame: signType === "awning" ? awningFrame : undefined,
-      fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
-      illumination,
+      referenceId,
+      lightingType,
+      fontStyle,
+      letterColor: primaryColor,
+      panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
+      panelBg:   colorSystem === "durabond" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : null,
+      acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
+      awningFrame: isAwning ? awningFrame : undefined,
+      fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+      awningIllumination: isAwning ? awningIllumination : undefined,
       isCorner: isCornerQuad,
       foldXPct,
     }
@@ -495,17 +417,15 @@ export default function NewOrderPage() {
         body: JSON.stringify({
           imageDataUrl: photoDataUrl, quad,
           logoDataUrl: logoDataUrl ?? undefined,
-          // material / color / lighting params (shared with the prompt preview)
-          signType, businessName, brandMode,
-          primaryColor: signType === "awning" ? awningFabric.hex : primaryColor,
-          illumination,
-          material,
-          panelFace: material === "aluminum" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
-          panelBg:   material === "aluminum" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : undefined,
-          acrylic:   material === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
-          lightType, returnGlow,
-          awningFrame: signType === "awning" ? awningFrame : undefined,
-          fabricName: signType === "awning" ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+          // reference-style + brand params (shared with the prompt preview)
+          referenceId, lightingType, businessName, brandMode,
+          fontStyle, letterColor: primaryColor,
+          panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
+          panelBg:   colorSystem === "durabond" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : undefined,
+          acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
+          awningFrame: isAwning ? awningFrame : undefined,
+          fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+          awningIllumination: isAwning ? awningIllumination : undefined,
           count: 3,
         }),
       })
@@ -536,7 +456,7 @@ export default function NewOrderPage() {
   function goTo(s: Step) {
     if (s === "quad" && !photoDataUrl) return
     if (s === "customize" && !quad) return
-    if (s === "preview" && (!hasBrandInput || !signType)) return
+    if (s === "preview" && !hasBrandInput) return
     setStep(s)
   }
 
@@ -550,32 +470,35 @@ export default function NewOrderPage() {
       height_inches: sizeResult.heightInches,
       width_confidence: sizeResult.confidence,
       business_name: businessName,
-      primary_color: signType === "awning" ? awningFabric.hex : primaryColor,
-      secondary_color: signType === "awning" ? null : (secondaryColor || null),
-      material: signType === "awning" ? "vinyl" : material,
+      primary_color: isAwning ? awningFabric.hex : primaryColor,
+      secondary_color: isAwning ? null : (secondaryColor || null),
+      material,
       illumination,
       custom_notes: notes || null,
       estimation_references: sizeResult.referencesUsed,
       estimation_angle_warning: sizeResult.angleWarning,
       selection_quad: quad as SignSpec["selection_quad"],
+      // reference style the client picked (webs/signs structure)
+      reference_style: referenceId,
       ...(isCorner && {
         is_corner: true,
         front_width_inches: sizeResult.frontWidthInches,
         side_width_inches: sizeResult.sideWidthInches,
       }),
-      ...(signType === "awning" && {
+      ...(isAwning && {
         awning_frame_style: awningFrame,
         awning_fabric: awningFabric,
       }),
       brand_mode: brandMode,
-      ...(signType !== "awning" && material === "aluminum" && {
+      ...(!isAwning && { font_style: fontStyle }),
+      ...(colorSystem === "durabond" && {
         panel_face_color: { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex },
         panel_bg_color:   { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   },
-        channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
+        channel_lighting: { type: lightingType },
       }),
-      ...(signType !== "awning" && material === "acrylic" && {
+      ...(colorSystem === "acrylic" && {
         acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish },
-        channel_lighting: { type: lightType, ...(["halo","front_halo"].includes(lightType) && { return_glow: returnGlow }) },
+        channel_lighting: { type: lightingType },
       }),
     }
 
@@ -833,25 +756,64 @@ export default function NewOrderPage() {
               )}
             </div>
 
+            {/* ── Font style (only when a business name is on the sign) ── */}
+            {businessName.trim() && (
+              <div>
+                <label className="block text-sm font-medium mb-2">Font style</label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  How the business name letters are shaped.
+                  {brandMode === "logo-and-text" && " Letter color is taken from your logo automatically."}
+                </p>
+                <div className="grid grid-cols-3 gap-2">
+                  {FONT_OPTIONS.map(f => {
+                    const active = fontStyle === f.id
+                    return (
+                      <button key={f.id} type="button" onClick={() => setFontStyle(f.id)}
+                        className={`flex flex-col items-center gap-1.5 rounded-lg border-2 px-3 py-3 transition-all
+                          ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                        <span className={`text-2xl font-bold
+                          ${f.id === "modern-sans" ? "font-sans" : f.id === "classic-serif" ? "font-serif" : "font-sans tracking-tighter"}`}>Aa</span>
+                        <span className={`text-xs ${active ? "text-accent font-medium" : "text-muted-foreground"}`}>{f.name}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* ── Sign style (reference styles, ported from webs/signs) ── */}
             <div>
-              <label className="block text-sm font-medium mb-2">Sign type *</label>
-              <div className="grid grid-cols-3 gap-2">
-                {SIGN_TYPES.map(t => (
-                  <button
-                    key={t.value}
-                    type="button"
-                    onClick={() => setSignType(t.value)}
-                    className={`text-left rounded-lg border px-3 py-2 text-xs font-medium transition-colors
-                      ${signType === t.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}
-                  >
-                    {t.label}
-                  </button>
-                ))}
+              <label className="block text-sm font-medium mb-2">Sign style *</label>
+              <p className="text-xs text-muted-foreground mb-3">Pick the construction & lighting style for your sign.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {REFERENCE_STYLES.map(ref => {
+                  const active = referenceId === ref.id
+                  return (
+                    <button key={ref.id} type="button" onClick={() => setReferenceId(ref.id)}
+                      className={`relative text-left rounded-xl border-2 overflow-hidden transition-all
+                        ${active ? "border-accent shadow-sm" : "border-border hover:border-accent/40"}`}>
+                      <div className="h-24 bg-muted overflow-hidden flex items-center justify-center">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={ref.imageUrl} alt={ref.name} className="w-full h-full object-cover"
+                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }} />
+                      </div>
+                      <div className="p-2.5">
+                        <p className="text-xs font-semibold">{ref.name}</p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{ref.description}</p>
+                        <div className="flex gap-1 mt-1.5 flex-wrap">
+                          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium">{ref.lightingType}</span>
+                          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium">{ref.materialFeel}</span>
+                        </div>
+                      </div>
+                      {active && <span className="absolute top-2 right-2 text-accent text-lg drop-shadow">✓</span>}
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
-            {/* ── Awning-specific options ── */}
-            {signType === "awning" ? (
+            {/* ── Style-specific options ── */}
+            {isAwning ? (
               <>
                 {/* Frame style with SVG icons */}
                 <div>
@@ -937,9 +899,9 @@ export default function NewOrderPage() {
                       <button
                         key={o.value}
                         type="button"
-                        onClick={() => setIllumination(o.value)}
+                        onClick={() => setAwningIllumination(o.value)}
                         className={`text-left rounded-lg border px-3 py-2.5 text-xs transition-colors
-                          ${illumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
+                          ${awningIllumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
                       >
                         <span className="block font-medium">{o.label}</span>
                         <span className="block text-[10px] text-muted-foreground mt-0.5">{o.desc}</span>
@@ -950,22 +912,23 @@ export default function NewOrderPage() {
               </>
             ) : (
               <>
-                {/* ── Material ── */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">Material</label>
-                  <div className="grid grid-cols-3 gap-2">
-                    {MATERIAL_OPTS.map(o => (
-                      <button key={o.value} type="button" onClick={() => setMaterial(o.value)}
-                        className={`text-left rounded-lg border px-3 py-2 text-xs font-medium transition-colors
-                          ${material === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
-                        {o.label}
-                      </button>
-                    ))}
-                  </div>
+                {/* ── Lighting (determined by the chosen sign style) ── */}
+                <div className="flex items-center gap-2 text-xs bg-muted/40 border border-border rounded-lg px-3 py-2.5">
+                  <span>💡</span>
+                  <span className="text-muted-foreground">
+                    Lighting comes with your sign style —{" "}
+                    <span className="font-medium text-foreground">
+                      {referenceId === "no-light-outdoor"
+                        ? "no illumination (daytime / floodlit)"
+                        : selectedReference.lightingType === "front" ? "front-lit (glowing faces)"
+                        : selectedReference.lightingType === "back" ? "back-lit halo glow"
+                        : "front + back lit"}
+                    </span>
+                  </span>
                 </div>
 
-                {/* ── Dura-Bond ACP colors (aluminum) ── */}
-                {material === "aluminum" && (
+                {/* ── Dura-Bond ACP colors (no-light / aluminum styles) ── */}
+                {colorSystem === "durabond" && (
                   <>
                     <PanelColorPicker
                       label="Letter face color (Dura-Bond ACP)"
@@ -990,8 +953,8 @@ export default function NewOrderPage() {
                   </>
                 )}
 
-                {/* ── Dura-Cast® Acrylic color ── */}
-                {material === "acrylic" && (
+                {/* ── Dura-Cast® Acrylic color (illuminated styles) ── */}
+                {colorSystem === "acrylic" && (
                   <div>
                     <label className="block text-sm font-medium mb-1">Dura-Cast® acrylic face color</label>
                     <p className="text-xs text-muted-foreground mb-2">
@@ -1042,63 +1005,13 @@ export default function NewOrderPage() {
                   </div>
                 )}
 
-                {/* ── Other materials — simple color picker ── */}
-                {material !== "aluminum" && material !== "acrylic" && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Primary color</label>
-                      <div className="flex items-center gap-2">
-                        <input type="color" value={primaryColor} onChange={e => setPrimaryColor(e.target.value)}
-                          className="w-10 h-10 rounded border border-border cursor-pointer" />
-                        <input value={primaryColor} onChange={e => setPrimaryColor(e.target.value)}
-                          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono" />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-medium mb-2">Secondary color <span className="text-muted-foreground font-normal">(optional)</span></label>
-                      <div className="flex items-center gap-2">
-                        <input type="color" value={secondaryColor || "#ffffff"} onChange={e => setSecondaryColor(e.target.value)}
-                          className="w-10 h-10 rounded border border-border cursor-pointer" />
-                        <input value={secondaryColor} onChange={e => setSecondaryColor(e.target.value)}
-                          placeholder="#ffffff"
-                          className="flex-1 rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent font-mono" />
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Channel letter lighting (all non-awning signs) ── */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">Lighting</label>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {LIGHT_TYPES.map(o => (
-                      <button key={o.value} type="button" onClick={() => setLightType(o.value)}
-                        className={`text-left rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors
-                          ${lightType === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
-                        <LightTypeIcon type={o.value} active={lightType === o.value} />
-                        <span className={`block font-medium leading-tight mt-1 ${lightType === o.value ? "text-accent" : ""}`}>{o.label}</span>
-                        <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{o.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* ── Return glow (only for halo / front+halo) ── */}
-                {(lightType === "halo" || lightType === "front_halo") && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Return glow depth</label>
-                    <p className="text-xs text-muted-foreground mb-2">How far the halo light wraps onto the letter return (side wall).</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      {RETURN_GLOW_OPTS.map(o => (
-                        <button key={o.value} type="button" onClick={() => setReturnGlow(o.value)}
-                          className={`text-left rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors
-                            ${returnGlow === o.value ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}>
-                          <ReturnGlowIcon glow={o.value} active={returnGlow === o.value} />
-                          <span className={`block font-medium leading-tight mt-1 ${returnGlow === o.value ? "text-accent" : ""}`}>{o.label}</span>
-                          <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{o.desc}</span>
-                        </button>
-                      ))}
-                    </div>
+                {/* ── Logo color note (Case C) ── */}
+                {brandMode === "logo-and-text" && (
+                  <div className="flex items-center gap-2 text-xs bg-accent/5 border border-accent/30 rounded-lg px-3 py-2.5">
+                    <span>🎨</span>
+                    <span className="text-muted-foreground">
+                      Letter color is sampled automatically from your logo for a unified brand look.
+                    </span>
                   </div>
                 )}
               </>
@@ -1290,9 +1203,9 @@ export default function NewOrderPage() {
 
           <div className="border border-border rounded-xl divide-y divide-border">
             <Row label="Business name" value={businessName} />
-            <Row label="Sign type" value={
+            <Row label="Sign style" value={
               <span className="flex items-center gap-1.5">
-                {SIGN_TYPES.find(t => t.value === signType)?.label ?? signType}
+                {selectedReference.name}
                 {isCorner && <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded">corner</span>}
               </span>
             } />
@@ -1309,7 +1222,7 @@ export default function NewOrderPage() {
             ) : (
               <Row label="Estimated size" value="Not estimated — go back to Mark Sign Area" />
             )}
-            {signType === "awning" ? (
+            {isAwning ? (
               <>
                 <Row label="Frame style" value={AWNING_FRAMES.find(f => f.value === awningFrame)?.label ?? awningFrame} />
                 <Row label="Sunbrella® fabric" value={
@@ -1318,13 +1231,39 @@ export default function NewOrderPage() {
                     {awningFabric.name} #{awningFabric.code}
                   </span>
                 } />
-                <Row label="Lighting" value={AWNING_LIGHTING.find(o => o.value === illumination)?.label ?? illumination} />
+                <Row label="Lighting" value={AWNING_LIGHTING.find(o => o.value === awningIllumination)?.label ?? awningIllumination} />
               </>
             ) : (
               <>
-                <Row label="Primary color" value={<span className="flex items-center gap-2"><span className="w-4 h-4 rounded border border-border inline-block" style={{ background: primaryColor }} />{primaryColor}</span>} />
-                <Row label="Illumination" value={ILLUMINATION_OPTS.find(o => o.value === illumination)?.label ?? illumination} />
-                <Row label="Material" value={MATERIAL_OPTS.find(o => o.value === material)?.label ?? material} />
+                {businessName.trim() && (
+                  <Row label="Font" value={FONT_OPTIONS.find(f => f.id === fontStyle)?.name ?? fontStyle} />
+                )}
+                {colorSystem === "durabond" && (
+                  <Row label="Face / background" value={
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelFaceColor.hex }} />
+                      {panelFaceColor.name}
+                      <span className="text-muted-foreground">on</span>
+                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelBgColor.hex }} />
+                      {panelBgColor.name}
+                    </span>
+                  } />
+                )}
+                {colorSystem === "acrylic" && (
+                  <Row label="Acrylic face" value={
+                    <span className="flex items-center gap-2">
+                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: acrylicColor.hex }} />
+                      {acrylicColor.name} #{acrylicColor.code}
+                      <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
+                    </span>
+                  } />
+                )}
+                <Row label="Lighting" value={
+                  referenceId === "no-light-outdoor" ? "No illumination"
+                  : selectedReference.lightingType === "front" ? "Front-lit"
+                  : selectedReference.lightingType === "back" ? "Back-lit halo"
+                  : "Front + back lit"
+                } />
               </>
             )}
             {notes && <Row label="Notes" value={notes} />}
