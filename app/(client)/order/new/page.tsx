@@ -2,6 +2,8 @@
 
 import { useState, useTransition } from "react"
 import { useRouter } from "next/navigation"
+import { createClient as createBrowserClient } from "@/lib/supabase/client"
+import { saveGuestProfile } from "@/app/actions/auth"
 import PhotoUpload from "@/components/order/PhotoUpload"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
@@ -299,6 +301,13 @@ export default function NewOrderPage() {
   const [submitting, startSubmit] = useTransition()
   const [submitError, setSubmitError] = useState<string | null>(null)
 
+  // Guest capture modal (shown instead of login when the user has no session)
+  const [showGuestModal, setShowGuestModal] = useState(false)
+  const [guestName, setGuestName] = useState("")
+  const [guestPhone, setGuestPhone] = useState("")
+  const [guestError, setGuestError] = useState<string | null>(null)
+  const [guestSubmitting, setGuestSubmitting] = useState(false)
+
   // Sign spec fields
   // ── Primary signage selector: reference style (webs/signs structure) ──
   const [referenceId, setReferenceId] = useState<string>(DEFAULT_REFERENCE.id)
@@ -494,8 +503,36 @@ export default function NewOrderPage() {
     }
   }
 
+  async function handleGuestSubmit() {
+    const name = guestName.trim()
+    const phone = guestPhone.trim()
+    if (!name) { setGuestError("Please enter your name."); return }
+    if (!phone) { setGuestError("Please enter your phone number."); return }
+    setGuestSubmitting(true)
+    setGuestError(null)
+    try {
+      const sb = createBrowserClient()
+      const { error: signInErr } = await sb.auth.signInAnonymously()
+      if (signInErr) throw signInErr
+      await sb.auth.updateUser({ data: { full_name: name, phone, role: "client" } })
+      const res = await saveGuestProfile(name, phone)
+      if (res?.error) throw new Error(res.error)
+      setShowGuestModal(false)
+      runPreview()
+    } catch (err) {
+      setGuestError(err instanceof Error ? err.message : "Could not proceed. Try again.")
+    } finally {
+      setGuestSubmitting(false)
+    }
+  }
+
   async function runPreview() {
     if (!photoDataUrl || !quad) return
+
+    // Show the guest capture modal instead of hitting the 401 wall
+    const { data: { user } } = await createBrowserClient().auth.getUser()
+    if (!user) { setShowGuestModal(true); return }
+
     setGenerating(true)
     setGenerateError(null)
     setPreviewOptions([])
@@ -531,6 +568,11 @@ export default function NewOrderPage() {
         body: JSON.stringify(payload),
       })
       const startData = await startRes.json().catch(() => ({})) as { jobId?: string; error?: string }
+      if (startRes.status === 401) {
+        setGenerating(false)
+        setShowGuestModal(true)
+        return
+      }
       if (!startRes.ok || !startData.jobId) {
         throw new Error(startData.error ?? `Could not start preview (${startRes.status})`)
       }
@@ -1569,6 +1611,54 @@ export default function NewOrderPage() {
             >
               {submitting ? "Submitting…" : "Submit for Quotes →"}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Guest capture modal ── */}
+      {showGuestModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
+          <div className="bg-background border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
+            <h2 className="text-lg font-bold mb-1">Almost there!</h2>
+            <p className="text-sm text-muted-foreground mb-5">
+              Tell us who you are so sign companies can reach you with quotes.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-sm font-medium mb-1">Your name</label>
+                <input
+                  type="text"
+                  value={guestName}
+                  onChange={e => setGuestName(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                  placeholder="Jane Smith"
+                  autoFocus
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Phone number</label>
+                <input
+                  type="tel"
+                  value={guestPhone}
+                  onChange={e => setGuestPhone(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                  placeholder="(555) 123-4567"
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+              {guestError && <p className="text-sm text-red-600">{guestError}</p>}
+              <button
+                onClick={handleGuestSubmit}
+                disabled={guestSubmitting}
+                className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              >
+                {guestSubmitting ? "Setting up…" : "Generate my preview →"}
+              </button>
+              <p className="text-xs text-center text-muted-foreground">
+                By continuing you agree to receive sign quotes at this number.
+              </p>
+            </div>
           </div>
         </div>
       )}
