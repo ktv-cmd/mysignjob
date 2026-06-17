@@ -44,9 +44,13 @@ export async function createOrder(params: {
     }
   }
 
-  // Upload AI preview if present
+  // Capture the AI preview if present. The async job flow already uploaded the
+  // preview to Storage and hands us a hosted URL — use it as-is. A data URL
+  // (legacy synchronous path) is uploaded here.
   let previewUrl: string | null = null
-  if (params.previewDataUrl) {
+  if (params.previewDataUrl && params.previewDataUrl.startsWith("http")) {
+    previewUrl = params.previewDataUrl
+  } else if (params.previewDataUrl) {
     const previewBase64 = params.previewDataUrl.split(",")[1]
     const previewBuffer = Buffer.from(previewBase64, "base64")
     const previewPath = `previews/${user.id}/${Date.now()}.jpg`

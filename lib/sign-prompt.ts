@@ -23,8 +23,11 @@ export interface SignPromptParams {
   letterColor?: string                  // hex chosen by client OR extracted from logo
   // ── material colors (kept from my-sign-job) ──
   panelFace?: PromptColor | null        // Dura-Bond ACP letter face (aluminum)
-  panelBg?: PromptColor | null          // Dura-Bond ACP backer panel (aluminum)
+  panelBg?: PromptColor | null          // backer panel color (when hasBackground)
   acrylic?: PromptColor | null          // Dura-Cast acrylic face (acrylic)
+  // ── backer panel (channel-letter styles) ──
+  hasBackground?: boolean               // true = letters on a finished backer panel; false = mounted directly on the wall
+  bgMaterial?: "aluminum" | "acrylic"   // backer panel material (when hasBackground)
   // ── awning ──
   awningFrame?: string
   fabricName?: string
@@ -65,16 +68,36 @@ function colorClause(p: SignPromptParams): string {
     return `The letter faces are ${finishDesc} in ${p.acrylic.name} (approx ${p.acrylic.hex}).`
   }
   if (p.panelFace) {
-    const face = `The letter faces are Dura-Bond aluminum composite in ${p.panelFace.name} (approx ${p.panelFace.hex}).`
-    const bg = p.panelBg
-      ? ` The backer/background panel behind the letters is Dura-Bond aluminum composite in ${p.panelBg.name} (approx ${p.panelBg.hex}).`
-      : ""
-    return face + bg
+    return `The letter faces are Dura-Bond aluminum composite in ${p.panelFace.name} (approx ${p.panelFace.hex}).`
   }
   if (p.letterColor) {
     return `The letters should be ${p.letterColor}.`
   }
   return "The letters should complement the building's color palette — brushed aluminum, matte black, or bronze."
+}
+
+// ─── Backer-panel clause (channel-letter styles only) ─────────────────────────
+// With a panel the letters sit on a clean finished backdrop; without one they are
+// stud-mounted straight onto the existing wall.
+function backgroundClause(p: SignPromptParams): string {
+  if (p.hasBackground === false) {
+    return "MOUNTING: The channel letters are mounted INDIVIDUALLY and DIRECTLY onto the existing building wall (flush stud-mount) — there is NO backer panel or raceway box behind them; the original wall surface stays fully visible between and around each letter."
+  }
+  if (p.hasBackground && p.panelBg) {
+    let panelDesc: string
+    if (p.bgMaterial === "acrylic") {
+      const f = p.panelBg.finish ?? "opaque"
+      panelDesc =
+        f === "translucent" ? `flush translucent acrylic backer panel (~3/16" thick) that glows evenly with internal LED illumination` :
+        f === "transparent" ? `flush tinted transparent acrylic backer panel (~3/16" thick), glass-like and see-through` :
+        f === "matte"       ? `flush matte-finish acrylic backer panel (~3/16" thick) with a diffused, non-glossy surface` :
+                              `flush acrylic backer panel (~3/16" thick) with a smooth solid opaque face`
+    } else {
+      panelDesc = `flush aluminum-composite backer panel (~1" thick) with crisp 90° edges`
+    }
+    return `BACKER PANEL: The letters are mounted on a rectangular ${panelDesc} finished in ${p.panelBg.name} (approx ${p.panelBg.hex}) that fills the entire sign zone, giving the letters a clean finished backdrop instead of the bare wall. The panel sits flat against the wall and the letters stand proud of its face.`
+  }
+  return ""
 }
 
 // ─── Awning color rules (ported from webs/signs getAwningColorDescription) ─────
@@ -165,6 +188,7 @@ export function buildSignPrompt(p: SignPromptParams): string {
     `Generate a photorealistic architectural photo of the storefront.`,
     `Inside the golden highlighted area, place new high-end dimensional 3D channel letters${fontPhrase} that clearly read ${contentDesc}.`,
     colorClause(p),
+    backgroundClause(p),
     lightSentence,
     fontDirective,
     `Ensure the signage is physically mounted to the wall with visible hardware — do not let it float; letter return planes (sides) must be visible to prove 3D depth.`,

@@ -101,7 +101,9 @@ export interface SignSpec {
   logo_url?: string | null
   // Channel letter material details
   panel_face_color?: { name: string; code: string; hex: string }   // Dura-Bond ACP face
-  panel_bg_color?: { name: string; code: string; hex: string }     // Dura-Bond ACP background
+  has_background?: boolean                                          // channel letters on a backer panel (true) vs mounted directly on the wall (false)
+  bg_material?: "aluminum" | "acrylic"                             // backer panel material (when has_background)
+  panel_bg_color?: { name: string; code: string; hex: string; finish?: string }  // backer panel color (+ acrylic finish)
   acrylic_color?: { name: string; code: string; hex: string; finish: "translucent" | "opaque" | "transparent" | "matte" }
   channel_lighting?: { type: string; return_glow?: string }
 }

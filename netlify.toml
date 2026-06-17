@@ -15,3 +15,7 @@
 
 [functions."___netlify-server-handler"]
   included_files = ["node_modules/@img/**"]
+
+# The async preview worker uses sharp too — bundle the same native libs.
+[functions."preview-generate-background"]
+  included_files = ["node_modules/@img/**"]

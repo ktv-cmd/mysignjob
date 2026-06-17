@@ -10,6 +10,7 @@ import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, Sunbre
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
+  nearestColor,
   type PanelColor, type AcrylicColor,
 } from "@/lib/sign-colors"
 import {
@@ -320,6 +321,25 @@ export default function NewOrderPage() {
   const [panelBgColor, setPanelBgColor] = useState<PanelColor>(DEFAULT_PANEL_BG_COLOR)
   const [showAllPanelFace, setShowAllPanelFace] = useState(false)
   const [showAllPanelBg, setShowAllPanelBg] = useState(false)
+  // Backer panel behind the letters (channel-letter styles). Default ON — most
+  // storefront walls aren't an attractive backdrop on their own.
+  const [hasBackground, setHasBackground] = useState(true)
+  // Backer panel material — aluminum (Dura-Bond ACP) or acrylic. Each has its own palette.
+  const [bgMaterial, setBgMaterial] = useState<"aluminum" | "acrylic">("aluminum")
+  // Acrylic backer: finish (default opaque — a solid panel) + color filtered to it.
+  const [bgAcrylicFinish, setBgAcrylicFinish] = useState<"translucent" | "opaque" | "transparent" | "matte">("opaque")
+  const [bgAcrylicColor, setBgAcrylicColor] = useState<AcrylicColor>(
+    ACRYLIC_COLORS.find(c => c.finish === "opaque" && c.code === "2447") ?? ACRYLIC_COLORS[0]
+  )
+
+  // When the backer finish changes, keep the selected color valid for that finish.
+  function chooseBgAcrylicFinish(finish: "translucent" | "opaque" | "transparent" | "matte") {
+    setBgAcrylicFinish(finish)
+    if (bgAcrylicColor.finish !== finish) {
+      const first = ACRYLIC_COLORS.find(c => c.finish === finish)
+      if (first) setBgAcrylicColor(first)
+    }
+  }
   // Dura-Cast acrylic finish (client choice) + color
   const [acrylicFinish, setAcrylicFinish] = useState<"translucent" | "opaque" | "transparent" | "matte">("translucent")
   const [acrylicColor, setAcrylicColor] = useState<AcrylicColor>(DEFAULT_ACRYLIC_COLOR)
@@ -338,6 +358,9 @@ export default function NewOrderPage() {
   const mapping = getSpecMapping(referenceId)
   const signType = mapping.signType
   const isAwning = referenceId === "awning"
+  // Channel-letter styles (everything except the cabinet light-box and the awning)
+  // can sit on a backer panel or mount directly to the wall.
+  const isChannelLetter = !isAwning && referenceId !== "light-box"
   const lightingType = selectedReference.lightingType
   const illumination: IlluminationType = isAwning ? awningIllumination : mapping.illumination
   // Material is a CLIENT choice for every non-awning style (default = cheaper acrylic).
@@ -383,6 +406,21 @@ export default function NewOrderPage() {
     })
   }
 
+  // Derive the sign's styling from an uploaded logo (ported from webs/signs):
+  //  • sample the logo's dominant color and snap every material swatch to the
+  //    nearest match, so the chosen sign color reflects the logo
+  //  • when it's logo-only (no business name), use the cabinet/light-box format —
+  //    the correct structure for displaying a logo (Case A, full-bleed face)
+  async function applyLogoStyling(logoUrl: string) {
+    const color = await extractDominantColor(logoUrl)
+    setPrimaryColor(color)
+    setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
+    const acrylicMatch = nearestColor(color, ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish))
+    if (acrylicMatch) setAcrylicColor(acrylicMatch)
+    // Logo-only → cabinet light-box format (matches webs/signs CASE A).
+    if (!businessName.trim() && referenceId !== "awning") setReferenceId("light-box")
+  }
+
   // Colors shown: always include the 12 common + the currently selected color (even if not common)
   const visibleColors = showAllColors
     ? SUNBRELLA_COLORS
@@ -399,6 +437,11 @@ export default function NewOrderPage() {
   // Colors are filtered to the chosen finish (client picks the finish first).
   const visibleAcrylic = ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish)
 
+  // Backer panel: acrylic colors filtered to the chosen backer finish.
+  const bgAcrylicOptions = ACRYLIC_COLORS.filter(c => c.finish === bgAcrylicFinish)
+  // Active background color (depends on the chosen panel material).
+  const bgColor = bgMaterial === "acrylic" ? bgAcrylicColor : panelBgColor
+
   // Build the exact prompt params shared by the client (display) and server (generation)
   function buildPromptParams(): SignPromptParams {
     const isCornerQuad = !!quad && quad.length === 6
@@ -412,7 +455,13 @@ export default function NewOrderPage() {
       fontStyle,
       letterColor: primaryColor,
       panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
-      panelBg:   colorSystem === "durabond" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : null,
+      panelBg:   isChannelLetter && hasBackground
+        ? (bgMaterial === "acrylic"
+            ? { name: bgColor.name, code: bgColor.code, hex: bgColor.hex, finish: bgAcrylicColor.finish }
+            : { name: bgColor.name, code: bgColor.code, hex: bgColor.hex })
+        : null,
+      hasBackground: isChannelLetter ? hasBackground : undefined,
+      bgMaterial: isChannelLetter && hasBackground ? bgMaterial : undefined,
       acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
       awningFrame: isAwning ? awningFrame : undefined,
       fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
@@ -453,40 +502,58 @@ export default function NewOrderPage() {
     setSelectedPreviewIdx(0)
     setPreviewSkipped(false)
 
+    const payload = {
+      imageDataUrl: photoDataUrl, quad,
+      logoDataUrl: logoDataUrl ?? undefined,
+      // reference-style + brand params (shared with the prompt preview)
+      referenceId, lightingType, businessName, brandMode,
+      fontStyle, letterColor: primaryColor,
+      panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
+      panelBg:   isChannelLetter && hasBackground
+        ? (bgMaterial === "acrylic"
+            ? { name: bgColor.name, code: bgColor.code, hex: bgColor.hex, finish: bgAcrylicColor.finish }
+            : { name: bgColor.name, code: bgColor.code, hex: bgColor.hex })
+        : undefined,
+      hasBackground: isChannelLetter ? hasBackground : undefined,
+      bgMaterial: isChannelLetter && hasBackground ? bgMaterial : undefined,
+      acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
+      awningFrame: isAwning ? awningFrame : undefined,
+      fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+      awningIllumination: isAwning ? awningIllumination : undefined,
+      count: 3,
+    }
+
     try {
-      const res = await fetch("/api/order/generate-preview", {
+      // 1) Kick off an async job (returns fast — no serverless timeout).
+      const startRes = await fetch("/api/order/preview/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          imageDataUrl: photoDataUrl, quad,
-          logoDataUrl: logoDataUrl ?? undefined,
-          // reference-style + brand params (shared with the prompt preview)
-          referenceId, lightingType, businessName, brandMode,
-          fontStyle, letterColor: primaryColor,
-          panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
-          panelBg:   colorSystem === "durabond" ? { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   } : undefined,
-          acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
-          awningFrame: isAwning ? awningFrame : undefined,
-          fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
-          awningIllumination: isAwning ? awningIllumination : undefined,
-          count: 3,
-        }),
+        body: JSON.stringify(payload),
       })
-
-      const text = await res.text()
-      let data: { previewDataUrls?: string[]; skipped?: boolean; error?: string }
-      try {
-        data = JSON.parse(text)
-      } catch {
-        throw new Error(`Server error (${res.status}) — please try again.`)
+      const startData = await startRes.json().catch(() => ({})) as { jobId?: string; error?: string }
+      if (!startRes.ok || !startData.jobId) {
+        throw new Error(startData.error ?? `Could not start preview (${startRes.status})`)
       }
 
-      if (data.skipped) { setPreviewSkipped(true); return }
-      if (!res.ok) throw new Error(data.error ?? `Server error (${res.status})`)
-
-      const urls = data.previewDataUrls ?? []
-      if (urls.length === 0) throw new Error("No previews were generated. Please try again.")
-      setPreviewOptions(urls)
+      // 2) Poll for completion (worker generates + uploads, then we get URLs).
+      const jobId = startData.jobId
+      const deadline = Date.now() + 4 * 60 * 1000 // 4 min cap
+      while (Date.now() < deadline) {
+        await new Promise(r => setTimeout(r, 3000))
+        const sRes = await fetch(`/api/order/preview/status?jobId=${jobId}`)
+        const sData = await sRes.json().catch(() => ({})) as { status?: string; previewUrls?: string[]; error?: string }
+        if (!sRes.ok) continue // transient — keep polling
+        if (sData.status === "done") {
+          const urls = sData.previewUrls ?? []
+          if (urls.length === 0) throw new Error("No previews were generated. Please try again.")
+          setPreviewOptions(urls)
+          return
+        }
+        if (sData.status === "error") {
+          throw new Error(sData.error ?? "Preview generation failed.")
+        }
+      }
+      throw new Error("Preview timed out. Please try again.")
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "Preview generation failed")
     } finally {
@@ -534,9 +601,18 @@ export default function NewOrderPage() {
       }),
       brand_mode: brandMode,
       ...(!isAwning && { font_style: fontStyle }),
+      ...(isChannelLetter && {
+        has_background: hasBackground,
+        ...(hasBackground && {
+          bg_material: bgMaterial,
+          panel_bg_color: {
+            name: bgColor.name, code: bgColor.code, hex: bgColor.hex,
+            ...(bgMaterial === "acrylic" && { finish: bgAcrylicColor.finish }),
+          },
+        }),
+      }),
       ...(colorSystem === "durabond" && {
         panel_face_color: { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex },
-        panel_bg_color:   { name: panelBgColor.name,   code: panelBgColor.code,   hex: panelBgColor.hex   },
         channel_lighting: { type: lightingType },
       }),
       ...(colorSystem === "acrylic" && {
@@ -755,11 +831,8 @@ export default function NewOrderPage() {
                       reader.onload = async (ev) => {
                         const url = ev.target?.result as string
                         setLogoDataUrl(url)
-                        // Auto-fill color from logo when name is also present
-                        if (businessName) {
-                          const color = await extractDominantColor(url)
-                          setPrimaryColor(color)
-                        }
+                        // Derive color (closest swatch) + format from the logo.
+                        await applyLogoStyling(url)
                       }
                       reader.readAsDataURL(file)
                     }}
@@ -780,10 +853,13 @@ export default function NewOrderPage() {
                 value={businessName}
                 onChange={async e => {
                   setBusinessName(e.target.value)
-                  // When user types a name and a logo is already loaded, extract color
+                  // When a logo is already loaded, keep the sign color synced to it.
                   if (e.target.value && logoDataUrl) {
                     const color = await extractDominantColor(logoDataUrl)
                     setPrimaryColor(color)
+                    setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
+                    const acrylicMatch = nearestColor(color, ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish))
+                    if (acrylicMatch) setAcrylicColor(acrylicMatch)
                   }
                 }}
                 placeholder="e.g. Joe's Pizza"
@@ -996,28 +1072,16 @@ export default function NewOrderPage() {
 
                 {/* ── Dura-Bond ACP colors (aluminum) ── */}
                 {colorSystem === "durabond" && (
-                  <>
-                    <PanelColorPicker
-                      label="Letter face color (Dura-Bond ACP)"
-                      subtitle="Color of the letter/panel face"
-                      selected={panelFaceColor}
-                      onSelect={setPanelFaceColor}
-                      visible={visiblePanelFace}
-                      showAll={showAllPanelFace}
-                      onToggleAll={() => setShowAllPanelFace(v => !v)}
-                      total={DURABOND_COLORS.length}
-                    />
-                    <PanelColorPicker
-                      label="Background panel color (Dura-Bond ACP)"
-                      subtitle="Color of the backer panel behind the letters"
-                      selected={panelBgColor}
-                      onSelect={setPanelBgColor}
-                      visible={visiblePanelBg}
-                      showAll={showAllPanelBg}
-                      onToggleAll={() => setShowAllPanelBg(v => !v)}
-                      total={DURABOND_COLORS.length}
-                    />
-                  </>
+                  <PanelColorPicker
+                    label="Letter face color (Dura-Bond ACP)"
+                    subtitle="Color of the letter/panel face"
+                    selected={panelFaceColor}
+                    onSelect={setPanelFaceColor}
+                    visible={visiblePanelFace}
+                    showAll={showAllPanelFace}
+                    onToggleAll={() => setShowAllPanelFace(v => !v)}
+                    total={DURABOND_COLORS.length}
+                  />
                 )}
 
                 {/* ── Dura-Cast® Acrylic finish + color (illuminated styles) ── */}
@@ -1079,6 +1143,137 @@ export default function NewOrderPage() {
                       <span className="text-xs text-muted-foreground">#{acrylicColor.code}</span>
                       <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
                     </div>
+                  </div>
+                )}
+
+                {/* ── Background panel: letters with a backdrop vs mounted on the wall ── */}
+                {isChannelLetter && (
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Background</label>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      Most storefront walls aren&apos;t a clean backdrop on their own. A background panel sits behind your
+                      letters so they read crisply and look finished — that&apos;s why it&apos;s the default. Choose{" "}
+                      <span className="font-medium">Letters only</span> if your wall already looks great (clean brick,
+                      smooth stucco, nice stone) and you want the letters mounted straight onto it.
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <button type="button" onClick={() => setHasBackground(true)}
+                        className={`text-left rounded-lg border-2 p-3 transition-all
+                          ${hasBackground ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-sm font-semibold ${hasBackground ? "text-accent" : ""}`}>With background</span>
+                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Recommended</span>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground leading-snug">Letters mounted on a finished backer panel — clean, professional, hides an uneven wall.</p>
+                      </button>
+                      <button type="button" onClick={() => setHasBackground(false)}
+                        className={`text-left rounded-lg border-2 p-3 transition-all
+                          ${!hasBackground ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                        <span className={`block text-sm font-semibold mb-1 ${!hasBackground ? "text-accent" : ""}`}>Letters only</span>
+                        <p className="text-[11px] text-muted-foreground leading-snug">Letters mounted directly on the wall — best when the wall itself looks great.</p>
+                      </button>
+                    </div>
+
+                    {hasBackground && (
+                      <div className="mt-4 space-y-4">
+                        {/* Backer panel material */}
+                        <div>
+                          <label className="block text-sm font-medium mb-1">Background material</label>
+                          <p className="text-xs text-muted-foreground mb-2">
+                            Aluminum composite is the durable standard backer; acrylic is a smooth solid panel that pairs naturally with acrylic letters.
+                          </p>
+                          <div className="grid grid-cols-2 gap-2">
+                            <button type="button" onClick={() => setBgMaterial("aluminum")}
+                              className={`text-left rounded-lg border-2 p-3 transition-all
+                                ${bgMaterial === "aluminum" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                              <span className={`block text-sm font-semibold mb-0.5 ${bgMaterial === "aluminum" ? "text-accent" : ""}`}>Aluminum (Dura-Bond)</span>
+                              <span className="block text-[11px] text-muted-foreground leading-snug">Rigid ACM panel — most durable, fully weatherproof.</span>
+                            </button>
+                            <button type="button" onClick={() => setBgMaterial("acrylic")}
+                              className={`text-left rounded-lg border-2 p-3 transition-all
+                                ${bgMaterial === "acrylic" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                              <span className={`block text-sm font-semibold mb-0.5 ${bgMaterial === "acrylic" ? "text-accent" : ""}`}>Acrylic</span>
+                              <span className="block text-[11px] text-muted-foreground leading-snug">Smooth solid acrylic panel — matches acrylic letters.</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Backer panel color — palette follows the material */}
+                        {bgMaterial === "aluminum" ? (
+                          <PanelColorPicker
+                            label="Background panel color (Dura-Bond ACP)"
+                            subtitle="Color of the backer panel behind the letters"
+                            selected={panelBgColor}
+                            onSelect={setPanelBgColor}
+                            visible={visiblePanelBg}
+                            showAll={showAllPanelBg}
+                            onToggleAll={() => setShowAllPanelBg(v => !v)}
+                            total={DURABOND_COLORS.length}
+                          />
+                        ) : (
+                          <div>
+                            {/* Acrylic backer finish */}
+                            <label className="block text-sm font-medium mb-1">Acrylic backer finish</label>
+                            <p className="text-xs text-muted-foreground mb-2">
+                              Opaque is the usual solid backer; translucent glows with the sign&apos;s lighting.
+                            </p>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                              {ACRYLIC_FINISHES.map(f => {
+                                const active = bgAcrylicFinish === f.value
+                                return (
+                                  <button key={f.value} type="button" onClick={() => chooseBgAcrylicFinish(f.value)}
+                                    className={`text-left rounded-lg border-2 p-2.5 transition-all
+                                      ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
+                                    <span className="flex items-center gap-1.5 mb-0.5">
+                                      <span className="font-mono text-[11px] font-bold bg-muted rounded px-1">{f.badge}</span>
+                                      <span className={`text-xs font-semibold ${active ? "text-accent" : ""}`}>{f.label}</span>
+                                    </span>
+                                    <span className="block text-[10px] text-muted-foreground leading-snug">{f.desc}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+
+                            <label className="block text-sm font-medium mb-1">
+                              {ACRYLIC_FINISHES.find(f => f.value === bgAcrylicFinish)?.label} backer color
+                            </label>
+                            <p className="text-xs text-muted-foreground mb-3">
+                              Selected: <span className="font-medium">{bgAcrylicColor.name}</span>
+                              <span className="text-muted-foreground"> · #{bgAcrylicColor.code}</span>
+                            </p>
+                            <div className="grid grid-cols-6 gap-2">
+                              {bgAcrylicOptions.map(c => {
+                                const isSelected = c.code === bgAcrylicColor.code
+                                const opacity = c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1
+                                return (
+                                  <button key={c.code} type="button" title={`${c.name} #${c.code} — ${c.finish}`}
+                                    onClick={() => setBgAcrylicColor(c)}
+                                    className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                                      ${isSelected ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
+                                    <div className="w-full h-full" style={{ background: c.hex, opacity }} />
+                                    <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
+                                      <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
+                                    </div>
+                                    {isSelected && (
+                                      <div className="absolute inset-0 flex items-center justify-center">
+                                        <span className="text-white text-sm drop-shadow">✓</span>
+                                      </div>
+                                    )}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            <div className="mt-2 flex items-center gap-2">
+                              <div className="w-5 h-5 rounded border border-border flex-shrink-0"
+                                style={{ background: bgAcrylicColor.hex, opacity: bgAcrylicColor.finish === "translucent" ? 0.75 : bgAcrylicColor.finish === "transparent" ? 0.55 : 1 }} />
+                              <span className="text-sm font-medium">{bgAcrylicColor.name}</span>
+                              <span className="text-xs text-muted-foreground">#{bgAcrylicColor.code}</span>
+                              <span className="text-xs text-accent capitalize">{bgAcrylicColor.finish}</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1317,13 +1512,10 @@ export default function NewOrderPage() {
                 )}
                 <Row label="Material" value={SIGN_MATERIALS.find(m => m.value === signMaterial)?.label ?? signMaterial} />
                 {colorSystem === "durabond" && (
-                  <Row label="Face / background" value={
+                  <Row label="Letter face" value={
                     <span className="flex items-center gap-2">
                       <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelFaceColor.hex }} />
                       {panelFaceColor.name}
-                      <span className="text-muted-foreground">on</span>
-                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelBgColor.hex }} />
-                      {panelBgColor.name}
                     </span>
                   } />
                 )}
@@ -1334,6 +1526,16 @@ export default function NewOrderPage() {
                       {acrylicColor.name} #{acrylicColor.code}
                       <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
                     </span>
+                  } />
+                )}
+                {isChannelLetter && (
+                  <Row label="Background" value={
+                    hasBackground ? (
+                      <span className="flex items-center gap-2">
+                        <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: bgColor.hex }} />
+                        {bgColor.name} · {bgMaterial === "acrylic" ? `acrylic (${bgAcrylicColor.finish})` : "aluminum"} panel
+                      </span>
+                    ) : "Letters only (no panel)"
                   } />
                 )}
                 <Row label="Lighting" value={
