@@ -80,13 +80,12 @@ export async function signOut() {
 
 // Called after signInAnonymously() on the client — persists name + phone to
 // the public.users row that the DB trigger created for the anonymous user.
-export async function saveGuestProfile(fullName: string, phone: string): Promise<{ error?: string }> {
+export async function saveGuestProfile(fullName: string, phone: string, email?: string): Promise<{ error?: string }> {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) return { error: "Not authenticated." }
-  const { error } = await supabase
-    .from("users")
-    .update({ full_name: fullName, phone })
-    .eq("id", user.id)
+  const update: Record<string, string> = { full_name: fullName, phone }
+  if (email) update.email = email
+  const { error } = await supabase.from("users").update(update).eq("id", user.id)
   return error ? { error: error.message } : {}
 }

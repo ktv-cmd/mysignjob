@@ -305,6 +305,7 @@ export default function NewOrderPage() {
   const [showGuestModal, setShowGuestModal] = useState(false)
   const [guestName, setGuestName] = useState("")
   const [guestPhone, setGuestPhone] = useState("")
+  const [guestEmail, setGuestEmail] = useState("")
   const [guestError, setGuestError] = useState<string | null>(null)
   const [guestSubmitting, setGuestSubmitting] = useState(false)
 
@@ -515,7 +516,7 @@ export default function NewOrderPage() {
       const { error: signInErr } = await sb.auth.signInAnonymously()
       if (signInErr) throw signInErr
       await sb.auth.updateUser({ data: { full_name: name, phone, role: "client" } })
-      const res = await saveGuestProfile(name, phone)
+      const res = await saveGuestProfile(name, phone, guestEmail.trim())
       if (res?.error) throw new Error(res.error)
       setShowGuestModal(false)
       runPreview()
@@ -1633,6 +1634,17 @@ export default function NewOrderPage() {
                   onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
                   placeholder="Jane Smith"
                   autoFocus
+                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Email <span className="text-muted-foreground font-normal">(optional)</span></label>
+                <input
+                  type="email"
+                  value={guestEmail}
+                  onChange={e => setGuestEmail(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                  placeholder="jane@example.com"
                   className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                 />
               </div>
