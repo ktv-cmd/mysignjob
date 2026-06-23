@@ -1558,6 +1558,27 @@ export default function SignConfigurator() {
                 </button>
               ))}
             </div>
+
+            {/* 2D / 3D toggle — visible whenever awning type is selected */}
+            {config.type === "awning" && (
+              <div className="absolute bottom-3 left-3 flex gap-1">
+                {(["2d","3d"] as AwningView[]).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => update({ awningView: v })}
+                    className={cn(
+                      "px-2.5 py-1 rounded-full text-[11px] font-bold transition-all",
+                      config.awningView === v
+                        ? "bg-white text-gray-900 shadow-md"
+                        : "bg-black/40 text-white/70 hover:bg-black/60 backdrop-blur"
+                    )}
+                  >
+                    {v === "2d" ? "📐 2D" : "🎯 3D"}
+                  </button>
+                ))}
+              </div>
+            )}
+
             {config.lit === "lit" && (
               <div className="absolute top-3 left-3 flex items-center gap-1 bg-black/50 text-yellow-300 text-xs px-2 py-1 rounded-full backdrop-blur">
                 <span className="animate-pulse">●</span> Live preview

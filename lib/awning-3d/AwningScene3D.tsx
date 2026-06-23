@@ -1,156 +1,172 @@
 "use client";
 
-import React, { useMemo, useRef, useEffect } from "react";
-import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { OrbitControls, PerspectiveCamera as PCamera } from "@react-three/drei";
+import React, { useRef, useEffect, useMemo } from "react";
+import { Canvas, useThree } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
-import { FrameSpec, SIGN_VIEW, CameraPreset } from "../awning-profiles";
-import { buildAwningGeometry } from "./meshBuilder";
+import { FrameSpec } from "../awning-profiles";
+import { buildAwningMesh } from "./meshBuilder";
 
-interface AwningMeshProps {
-  spec: FrameSpec;
-  colour: string;
-  isLit: boolean;
-  night: boolean;
+// ─── Detect WebGL once, at module load time (client-only) ─────────────────────
+function supportsWebGL(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const c = document.createElement("canvas");
+    return !!(c.getContext("webgl") || c.getContext("experimental-webgl"));
+  } catch {
+    return false;
+  }
 }
 
-/**
- * The 3D awning mesh component.
- */
-function AwningMesh({ spec, colour, isLit, night }: AwningMeshProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
-
-  const geometry = useMemo(() => buildAwningGeometry(spec), [spec]);
-
-  const material = useMemo(() => {
-    const col = new THREE.Color(colour);
-    return new THREE.MeshStandardMaterial({
-      color: col,
-      roughness: 0.6,
-      metalness: 0.1,
-      emissive: isLit && night ? col : new THREE.Color(0x000000),
-      emissiveIntensity: isLit && night ? 0.4 : 0,
-    });
-  }, [colour, isLit, night]);
-
-  return <mesh ref={meshRef} geometry={geometry} material={material} />;
+// ─── Wall backdrop (faint brick-like plane behind the awning) ─────────────────
+function WallBackdrop({ night }: { night: boolean }) {
+  return (
+    <mesh position={[0, 20, -5]} receiveShadow>
+      <planeGeometry args={[260, 140]} />
+      <meshStandardMaterial
+        color={night ? "#1e1c28" : "#d4cbc0"}
+        roughness={1}
+        metalness={0}
+      />
+    </mesh>
+  );
 }
 
-/**
- * Orthographic camera for 2D mode (locked preset view).
- */
-function OrthoCam2D() {
-  const { camera } = useThree();
-  const preset = SIGN_VIEW.awning;
-
-  useEffect(() => {
-    const ortho = new THREE.OrthographicCamera(-50, 50, 40, -40, 0.1, 1000);
-    // Position for 3/4 hero angle
-    ortho.position.set(30, 30, 50);
-    ortho.lookAt(0, 0, 0);
-    ortho.zoom = 1;
-    ortho.updateProjectionMatrix();
-
-    Object.assign(camera, ortho);
-  }, [camera]);
-
-  return null;
-}
-
-/**
- * Scene lighting.
- */
+// ─── Lighting ─────────────────────────────────────────────────────────────────
 function SceneLighting({ night }: { night: boolean }) {
   return (
     <>
-      {/* Ambient light */}
-      <ambientLight intensity={night ? 0.3 : 0.6} />
-
-      {/* Key light (front) */}
+      <ambientLight intensity={night ? 0.25 : 0.55} />
+      {/* Key light: upper-front */}
       <directionalLight
-        position={[10, 20, 20]}
-        intensity={night ? 0.5 : 1}
-        color={night ? "#ffb86d" : "#ffffff"}
+        position={[60, 80, 90]}
+        intensity={night ? 0.6 : 1.1}
+        color={night ? "#e8c070" : "#ffffff"}
+        castShadow
       />
-
-      {/* Back light (subtle) */}
+      {/* Fill light: upper-left */}
       <directionalLight
-        position={[-10, 15, -30]}
-        intensity={night ? 0.2 : 0.3}
-        color={night ? "#ffb86d" : "#e0e0ff"}
+        position={[-80, 40, 40]}
+        intensity={night ? 0.15 : 0.3}
+        color={night ? "#4466aa" : "#c8d8f0"}
+      />
+      {/* Ground bounce */}
+      <directionalLight
+        position={[0, -60, 40]}
+        intensity={night ? 0.05 : 0.12}
+        color={night ? "#112244" : "#f0e8d8"}
       />
     </>
   );
 }
 
-interface AwningScene3DProps {
+// ─── Awning mesh (uses primitive to attach a Group) ───────────────────────────
+interface AwningModelProps {
   spec: FrameSpec;
   colour: string;
-  is3d: boolean; // true for perspective + orbit, false for ortho locked
   isLit: boolean;
   night: boolean;
-  onOrbitChange?: (azimuth: number, elevation: number) => void;
 }
 
-/**
- * Main 3D scene component. Renders the awning mesh with either:
- * - 3D mode: perspective camera + orbit controls
- * - 2D mode: orthographic camera, locked view (3/4 hero angle)
- */
-export function AwningScene3D({
-  spec,
-  colour,
-  is3d,
-  isLit,
-  night,
-  onOrbitChange,
-}: AwningScene3DProps) {
-  // Fallback: if WebGL is not available, return null and let parent show SVG
-  if (!isBrowserSupportsWebGL()) {
-    return null;
-  }
+function AwningModel({ spec, colour, isLit, night }: AwningModelProps) {
+  const group = useMemo(
+    () => buildAwningMesh(spec, colour, isLit, night),
+    [spec, colour, isLit, night]
+  );
+
+  // Centre the group at origin for orbit
+  useEffect(() => {
+    const box = new THREE.Box3().setFromObject(group);
+    const centre = new THREE.Vector3();
+    box.getCenter(centre);
+    group.position.sub(centre);
+  }, [group]);
+
+  return <primitive object={group} />;
+}
+
+// ─── Camera that frames the awning correctly ──────────────────────────────────
+function AutoCamera() {
+  const { camera, gl } = useThree();
+
+  useEffect(() => {
+    // Position the perspective camera at a 3/4 hero angle (right, up, front)
+    camera.position.set(80, 55, 160);
+    camera.lookAt(0, -10, 0);
+    camera.near = 1;
+    camera.far = 2000;
+    if ((camera as THREE.PerspectiveCamera).fov !== undefined) {
+      (camera as THREE.PerspectiveCamera).fov = 42;
+    }
+    camera.updateProjectionMatrix();
+  }, [camera]);
+
+  return null;
+}
+
+// ─── Main export ─────────────────────────────────────────────────────────────
+
+export interface AwningScene3DProps {
+  spec: FrameSpec;
+  colour: string;
+  is3d: boolean;
+  isLit: boolean;
+  night: boolean;
+}
+
+export function AwningScene3D({ spec, colour, is3d, isLit, night }: AwningScene3DProps) {
+  if (!supportsWebGL()) return null;
+
+  const bgColour = night ? "#0d0d18" : "#c8d8e8";
 
   return (
-    <Canvas
-      camera={{ position: [30, 30, 50], fov: 50 }}
-      style={{ width: "100%", height: "100%" }}
-      gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }}
-    >
-      <SceneLighting night={night} />
+    <div style={{ width: "100%", height: "100%", background: bgColour }}>
+      <Canvas
+        shadows
+        camera={{ position: [80, 55, 160], fov: 42, near: 1, far: 2000 }}
+        style={{ width: "100%", height: "100%" }}
+        gl={{ antialias: true, alpha: false }}
+        onCreated={({ gl }) => {
+          gl.setClearColor(bgColour, 1);
+        }}
+      >
+        <color attach="background" args={[bgColour]} />
+        <fog attach="fog" args={[bgColour, 300, 900]} />
 
-      {/* The mesh */}
-      <AwningMesh spec={spec} colour={colour} isLit={isLit} night={night} />
+        <SceneLighting night={night} />
+        <WallBackdrop night={night} />
 
-      {/* Camera and controls */}
-      {is3d ? (
-        <OrbitControls
-          autoRotate={false}
-          enableZoom={true}
-          enablePan={false}
-          rotateSpeed={0.5}
-          zoomSpeed={1}
-          minDistance={50}
-          maxDistance={200}
-        />
-      ) : (
-        <OrthoCam2D />
+        <AwningModel spec={spec} colour={colour} isLit={isLit} night={night} />
+
+        <AutoCamera />
+        {is3d && (
+          <OrbitControls
+            enableZoom
+            enablePan={false}
+            rotateSpeed={0.6}
+            zoomSpeed={0.8}
+            minDistance={80}
+            maxDistance={500}
+            target={[0, -10, 0]}
+          />
+        )}
+      </Canvas>
+
+      {/* HUD hint */}
+      {is3d && (
+        <div
+          style={{
+            position: "absolute",
+            bottom: "48px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            pointerEvents: "none",
+          }}
+          className="text-white/50 text-[10px] bg-black/30 px-2 py-0.5 rounded-full backdrop-blur"
+        >
+          Drag to orbit · scroll to zoom
+        </div>
       )}
-    </Canvas>
+    </div>
   );
-}
-
-/**
- * Check if the browser supports WebGL.
- */
-function isBrowserSupportsWebGL(): boolean {
-  if (typeof window === "undefined") return false;
-
-  try {
-    const canvas = document.createElement("canvas");
-    const gl =
-      canvas.getContext("webgl") || (canvas.getContext("experimental-webgl") as any);
-    return !!gl;
-  } catch (e) {
-    return false;
-  }
 }
