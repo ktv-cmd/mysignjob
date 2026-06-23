@@ -84,20 +84,24 @@ export async function POST(req: NextRequest) {
     // Trigger the worker. On Netlify use a background function (15-min limit); the
     // POST returns 202 quickly so we can await it. Locally, fire-and-forget into a
     // normal route — next dev's long-lived process finishes the work.
+    //
+    // NETLIFY is only reliable at build time, not at function runtime. Use LOCAL_DEV
+    // as an explicit opt-in so the default (background function) fires in production.
     const origin = new URL(req.url).origin
-    if (process.env.NETLIFY === "true") {
-      await fetch(`${origin}/.netlify/functions/preview-generate-background`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId }),
-      }).catch(err => console.error("[preview/start] background trigger failed", err))
-    } else {
+    const isLocal = process.env.LOCAL_DEV === "true"
+    if (isLocal) {
       // Do NOT await — let it run in the background of the dev server.
       void fetch(`${origin}/api/order/preview/run`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jobId }),
       }).catch(err => console.error("[preview/start] local trigger failed", err))
+    } else {
+      await fetch(`${origin}/.netlify/functions/preview-generate-background`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      }).catch(err => console.error("[preview/start] background trigger failed", err))
     }
 
     return NextResponse.json({ jobId })

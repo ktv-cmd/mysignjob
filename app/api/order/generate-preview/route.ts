@@ -3,10 +3,15 @@ import { generatePreviewDataUrls, type PreviewJobParams } from "@/lib/ai/preview
 
 export const maxDuration = 180
 
-// Synchronous preview generation (legacy / local fast path). The async job flow
-// (/api/order/preview/start + /status) is preferred in production to avoid
-// serverless timeouts — but this remains for direct, short generations.
+// Synchronous preview generation — local dev only. In production this hits the
+// Netlify function timeout and returns a 504; use /api/order/preview/start instead.
 export async function POST(req: NextRequest) {
+  if (process.env.LOCAL_DEV !== "true") {
+    return NextResponse.json(
+      { error: "Use /api/order/preview/start for async generation in production." },
+      { status: 404 },
+    )
+  }
   try {
     const body = await req.json() as { imageDataUrl: string; logoDataUrl?: string } & PreviewJobParams
     const { imageDataUrl, logoDataUrl } = body

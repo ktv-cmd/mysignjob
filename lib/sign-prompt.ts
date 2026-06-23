@@ -49,15 +49,38 @@ function lightingDescription(lightingType?: string): string {
 
 // ─── Color clause — brand mode + material color systems ───────────────────────
 function colorClause(p: SignPromptParams): string {
-  // CASE A — logo only: colors come straight from the logo file
-  if (p.brandMode === "logo-only") {
-    return "The colors must match exactly the logo provided in Image 2 (non-negotiable brand identity)."
+  // Logo present — material was auto-selected to best match the logo's dominant color.
+  // Use ONE material only; never mix acrylic and aluminum on the same sign.
+  if (p.hasLogo) {
+    if (p.brandMode === "logo-only") {
+      if (p.acrylic) {
+        const finish = p.acrylic.finish ?? "translucent"
+        const finishDesc =
+          finish === "translucent" ? "translucent Dura-Cast® acrylic (faces glow with internal LED)" :
+          finish === "opaque"      ? "opaque Dura-Cast® acrylic (solid face, no light pass-through)" :
+          finish === "transparent" ? "transparent tinted Dura-Cast® acrylic (see-through face)" :
+                                     "matte Dura-Cast® acrylic (diffused non-gloss face)"
+        return `LOGO COLORS: reproduce the logo from Image 2 with exact fidelity — non-negotiable brand identity. Letter/face material: ${finishDesc} in ${p.acrylic.name} (${p.acrylic.hex}) — the closest acrylic match to the logo's dominant color. Do NOT use aluminum on any element.`
+      }
+      // No acrylic match — use aluminum only
+      const alum = p.panelFace ? ` in ${p.panelFace.name} (${p.panelFace.hex})` : " brushed aluminum"
+      return `LOGO COLORS: reproduce the logo from Image 2 with exact fidelity — non-negotiable brand identity. Letter/face material: Dura-Bond aluminum composite${alum} — no matching acrylic color available. Do NOT use acrylic on any element.`
+    }
+    // logo-and-text
+    if (p.acrylic) {
+      const finish = p.acrylic.finish ?? "translucent"
+      const finishDesc =
+        finish === "translucent" ? "translucent Dura-Cast® acrylic (faces glow)" :
+        finish === "opaque"      ? "opaque Dura-Cast® acrylic (solid face)" :
+        finish === "transparent" ? "transparent tinted Dura-Cast® acrylic" :
+                                   "matte Dura-Cast® acrylic"
+      return `LOGO: retain its exact original colors from Image 2. NAME LETTERS: use ${finishDesc} in ${p.acrylic.name} (${p.acrylic.hex}) — sampled from the logo's dominant color for unified brand identity. Do NOT use aluminum on any element.`
+    }
+    const alum = p.panelFace ? ` in ${p.panelFace.name} (${p.panelFace.hex})` : " brushed aluminum"
+    return `LOGO: retain its exact original colors from Image 2. NAME LETTERS: Dura-Bond aluminum composite channel letters${alum} — color sampled from the logo's dominant tone. Do NOT use acrylic on any element.`
   }
-  // CASE C — logo + name: sample dominant color from logo, apply to the name text
-  if (p.brandMode === "logo-and-text" && p.hasLogo) {
-    return "Sample the dominant HEX color from the logo in Image 2 and apply it EXACTLY to the name letterforms for unified brand identity. The logo must retain its exact original colors."
-  }
-  // CASE B — name only: prefer a specific material color, else the chosen letter color
+
+  // No logo — name-only (Case B): use the chosen material color
   if (p.acrylic) {
     const finish = p.acrylic.finish ?? "translucent"
     const finishDesc =

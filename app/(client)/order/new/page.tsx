@@ -12,7 +12,7 @@ import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, Sunbre
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
-  nearestColor,
+  nearestColor, colorDistance,
   type PanelColor, type AcrylicColor,
 } from "@/lib/sign-colors"
 import {
@@ -416,19 +416,32 @@ export default function NewOrderPage() {
     })
   }
 
-  // Derive the sign's styling from an uploaded logo (ported from webs/signs):
-  //  • sample the logo's dominant color and snap every material swatch to the
-  //    nearest match, so the chosen sign color reflects the logo
-  //  • when it's logo-only (no business name), use the cabinet/light-box format —
-  //    the correct structure for displaying a logo (Case A, full-bleed face)
+  // Derive the sign's styling from an uploaded logo:
+  //  • sample the dominant color from the logo
+  //  • if the nearest acrylic swatch is a close enough match → use acrylic with that color
+  //  • otherwise → switch to aluminum (Dura-Bond) with the nearest panel color
+  //    (never use both — one material only)
+  //  • always force a background panel on so the user picks the backdrop color
   async function applyLogoStyling(logoUrl: string) {
     const color = await extractDominantColor(logoUrl)
     setPrimaryColor(color)
-    setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
-    const acrylicMatch = nearestColor(color, ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish))
-    if (acrylicMatch) setAcrylicColor(acrylicMatch)
-    // Logo-only → cabinet light-box format (matches webs/signs CASE A).
-    if (!businessName.trim() && referenceId !== "awning") setReferenceId("light-box")
+
+    // Find the nearest acrylic across ALL finishes (not filtered to current finish).
+    const bestAcrylic = nearestColor(color, ACRYLIC_COLORS)
+    // Threshold: squared RGB distance ~150 per channel on average = 67500.
+    // Below this the acrylic swatch is a credible brand-color match.
+    const ACRYLIC_THRESHOLD = 20000
+    if (colorDistance(color, bestAcrylic.hex) < ACRYLIC_THRESHOLD) {
+      setSignMaterial("acrylic")
+      setAcrylicFinish(bestAcrylic.finish)
+      setAcrylicColor(bestAcrylic)
+    } else {
+      setSignMaterial("aluminum")
+      setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
+    }
+
+    // Always show a background panel when a logo is present — user must choose color.
+    setHasBackground(true)
   }
 
   // Colors shown: always include the 12 common + the currently selected color (even if not common)
@@ -580,12 +593,18 @@ export default function NewOrderPage() {
 
       // 2) Poll for completion (worker generates + uploads, then we get URLs).
       const jobId = startData.jobId
-      const deadline = Date.now() + 4 * 60 * 1000 // 4 min cap
+      const deadline = Date.now() + 5 * 60 * 1000 // 5 min — covers 3 sequential Gemini calls
+      let consecutiveNetworkErrors = 0
       while (Date.now() < deadline) {
-        await new Promise(r => setTimeout(r, 3000))
+        await new Promise(r => setTimeout(r, 4000))
         const sRes = await fetch(`/api/order/preview/status?jobId=${jobId}`)
+        if (!sRes.ok) {
+          consecutiveNetworkErrors++
+          if (consecutiveNetworkErrors >= 5) throw new Error("Lost connection to server. Please try again.")
+          continue
+        }
+        consecutiveNetworkErrors = 0
         const sData = await sRes.json().catch(() => ({})) as { status?: string; previewUrls?: string[]; error?: string }
-        if (!sRes.ok) continue // transient — keep polling
         if (sData.status === "done") {
           const urls = sData.previewUrls ?? []
           if (urls.length === 0) throw new Error("No previews were generated. Please try again.")
@@ -595,8 +614,9 @@ export default function NewOrderPage() {
         if (sData.status === "error") {
           throw new Error(sData.error ?? "Preview generation failed.")
         }
+        // status === "pending" | "processing" — keep polling
       }
-      throw new Error("Preview timed out. Please try again.")
+      throw new Error("Preview is taking too long. Please try again.")
     } catch (err) {
       setGenerateError(err instanceof Error ? err.message : "Preview generation failed")
     } finally {
@@ -1190,7 +1210,8 @@ export default function NewOrderPage() {
                 )}
 
                 {/* ── Background panel: letters with a backdrop vs mounted on the wall ── */}
-                {isChannelLetter && (
+                {/* Always show when a logo is present — user must choose background color. */}
+                {(isChannelLetter || !!logoDataUrl) && !isAwning && (
                   <div>
                     <label className="block text-sm font-medium mb-1">Background</label>
                     <p className="text-xs text-muted-foreground mb-3">

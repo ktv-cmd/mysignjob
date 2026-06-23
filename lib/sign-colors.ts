@@ -21,6 +21,13 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(v.slice(0, 2), 16) || 0, parseInt(v.slice(2, 4), 16) || 0, parseInt(v.slice(4, 6), 16) || 0]
 }
 
+// Squared RGB distance between two hex colors (0 = identical, 195075 = black↔white).
+export function colorDistance(a: string, b: string): number {
+  const [r1, g1, b1] = hexToRgb(a)
+  const [r2, g2, b2] = hexToRgb(b)
+  return (r1 - r2) ** 2 + (g1 - g2) ** 2 + (b1 - b2) ** 2
+}
+
 export function nearestColor<T extends { hex: string }>(hex: string, list: T[]): T {
   const [r, g, b] = hexToRgb(hex)
   let best = list[0]!, bestD = Infinity

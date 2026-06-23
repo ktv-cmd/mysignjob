@@ -275,18 +275,17 @@ export async function generatePreviewDataUrls(
   const genCount = Math.min(Math.max(1, params.count ?? 3), 3)
   const shared = { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H }
 
-  // Run sequentially — gemini-2.5-flash-image is a preview model with tight RPM limits.
-  const results: string[] = []
-  let lastError: Error | null = null
-  for (let i = 0; i < genCount; i++) {
-    try {
-      results.push(await generateOne(shared))
-    } catch (err) {
-      lastError = err instanceof Error ? err : new Error(String(err))
-    }
-  }
+  // Run all generations concurrently — cuts wall-clock time by ~3× vs sequential.
+  // Each call independently retries on 503/timeout so one slow call doesn't block others.
+  const settled = await Promise.allSettled(
+    Array.from({ length: genCount }, () => generateOne(shared)),
+  )
 
-  if (results.length === 0) throw lastError ?? new Error("All preview generations failed.")
+  const results = settled.flatMap(r => r.status === "fulfilled" ? [r.value] : [])
+  if (results.length === 0) {
+    const firstErr = settled.find(r => r.status === "rejected") as PromiseRejectedResult | undefined
+    throw firstErr?.reason instanceof Error ? firstErr.reason : new Error("All preview generations failed.")
+  }
   return results
 }
 

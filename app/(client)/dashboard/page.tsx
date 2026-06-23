@@ -16,10 +16,6 @@ export default async function ClientDashboard() {
 
   if (!profile) redirect("/login")
 
-  // Gate: must sign agreement and add payment method
-  if (!profile.agreement_signed_at) redirect("/onboarding/agreement")
-  if (!profile.payment_method_added) redirect("/onboarding/payment")
-
   const { data: orders } = await supabase
     .from("orders")
     .select("*")
