@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useState, useTransition, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { createClient as createBrowserClient } from "@/lib/supabase/client"
 import { saveGuestProfile } from "@/app/actions/auth"
@@ -19,7 +19,7 @@ import {
   REFERENCE_STYLES, DEFAULT_REFERENCE, FONT_OPTIONS, getSpecMapping,
   type FontStyle,
 } from "@/lib/sign-references"
-import { buildSignPrompt, type SignPromptParams } from "@/lib/sign-prompt"
+import PictureChoice from "@/components/order/PictureChoice"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
 
@@ -153,74 +153,6 @@ const SUNBRELLA_COLORS: SunbrellaFabric[] = [
 
 const DEFAULT_AWNING_FABRIC = SUNBRELLA_COLORS.find(c => c.code === "4601")! // Pacific Blue
 
-// ── SVG profile icons for each awning frame style (side-view silhouettes) ──────
-function AwningFrameIcon({ style, active }: { style: AwningFrameStyle; active: boolean }) {
-  const fill = active ? "currentColor" : "currentColor"
-  const opacity = active ? 0.85 : 0.35
-
-  const paths: Record<AwningFrameStyle, React.ReactNode> = {
-    // Classic shed slope — slants from high-left to lower-right
-    standard: (
-      <path d="M2,8 L56,24 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Shed slope + short valence hanging at the front edge
-    standard_valence: (
-      <>
-        <path d="M2,8 L56,22 L56,34 L2,34 Z" fill={fill} fillOpacity={opacity} />
-        <rect x="48" y="34" width="8" height="8" fill={fill} fillOpacity={opacity} />
-      </>
-    ),
-    // Gentle convex arc on top
-    arch: (
-      <path d="M2,10 Q29,0 56,18 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Convex front edge bows out
-    bullnose: (
-      <path d="M2,10 L40,10 Q62,10 54,32 L2,32 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Full dome semicircle
-    dome: (
-      <path d="M2,36 A27,27 0 0 1 56,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Shallower barrel curve
-    circular: (
-      <path d="M2,34 Q29,10 56,34 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Peaked A-frame / gable from front
-    gable: (
-      <path d="M2,36 L29,8 L56,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Semicircular arch with swept sides
-    half_round: (
-      <path d="M2,36 Q2,10 29,10 Q56,10 56,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Quarter-circle arc from wall (starts vertical, ends horizontal)
-    quarter_round: (
-      <path d="M2,8 A48,48 0 0 1 50,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Concave — inward curve on top surface
-    concave: (
-      <path d="M2,10 Q29,26 56,10 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Waterfall — S-curve cascade
-    waterfall: (
-      <path d="M2,10 C18,10 38,36 56,26 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-    // Flat-top rectangle / box
-    box: (
-      <path d="M2,10 L56,10 L56,36 L2,36 Z" fill={fill} fillOpacity={opacity} />
-    ),
-  }
-
-  return (
-    <svg viewBox="0 0 58 44" className="w-full h-10 mb-1" aria-hidden="true">
-      {/* Wall attachment line */}
-      <line x1="1" y1="2" x2="1" y2="42" stroke={fill} strokeOpacity={active ? 0.7 : 0.25} strokeWidth="2" strokeLinecap="round" />
-      {paths[style]}
-    </svg>
-  )
-}
-
 // ── Dura-Bond / panel color picker (reusable for face + bg) ─────────────────
 function PanelColorPicker({
   label, subtitle, selected, onSelect, visible, showAll, onToggleAll, total,
@@ -308,6 +240,7 @@ export default function NewOrderPage() {
   const [guestEmail, setGuestEmail] = useState("")
   const [guestError, setGuestError] = useState<string | null>(null)
   const [guestSubmitting, setGuestSubmitting] = useState(false)
+  const logoColorCacheRef = useRef<{ url: string; color: string } | null>(null)
 
   // Sign spec fields
   // ── Primary signage selector: reference style (webs/signs structure) ──
@@ -320,9 +253,18 @@ export default function NewOrderPage() {
   const [secondaryColor, setSecondaryColor] = useState("")
   const [notes, setNotes] = useState("")
   // Awning-specific
-  const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("standard")
+  const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("waterfall")
   const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
   const [awningIllumination, setAwningIllumination] = useState<IlluminationType>("none")
+  // New tree structure
+  const [signCategory, setSignCategory] = useState<"letters" | "light_box" | "awning" | null>(null)
+  const [isLit, setIsLit] = useState<boolean | null>(null)
+  const [lightingStyle, setLightingStyle] = useState<"front" | "back" | "back_side" | "front_back" | "front_side" | "full">("front")
+  const [lightBoxType, setLightBoxType] = useState<"cabinet" | "seethrough_letters">("cabinet")
+  const [isPerpendicular, setIsPerpendicular] = useState(false)
+  const [lightBoxShape, setLightBoxShape] = useState<string>("rectangle")
+  const [lightWarmth, setLightWarmth] = useState<number>(50)
+  const [lightColorful, setLightColorful] = useState<boolean>(false)
   const [showAllColors, setShowAllColors] = useState(false)
   // Corner / wraparound sign
   const [isCorner, setIsCorner] = useState(false)
@@ -423,7 +365,13 @@ export default function NewOrderPage() {
   //    (never use both — one material only)
   //  • always force a background panel on so the user picks the backdrop color
   async function applyLogoStyling(logoUrl: string) {
-    const color = await extractDominantColor(logoUrl)
+    let color: string
+    if (logoColorCacheRef.current?.url === logoUrl) {
+      color = logoColorCacheRef.current.color
+    } else {
+      color = await extractDominantColor(logoUrl)
+      logoColorCacheRef.current = { url: logoUrl, color }
+    }
     setPrimaryColor(color)
 
     // Find the nearest acrylic across ALL finishes (not filtered to current finish).
@@ -464,37 +412,6 @@ export default function NewOrderPage() {
   const bgAcrylicOptions = ACRYLIC_COLORS.filter(c => c.finish === bgAcrylicFinish)
   // Active background color (depends on the chosen panel material).
   const bgColor = bgMaterial === "acrylic" ? bgAcrylicColor : panelBgColor
-
-  // Build the exact prompt params shared by the client (display) and server (generation)
-  function buildPromptParams(): SignPromptParams {
-    const isCornerQuad = !!quad && quad.length === 6
-    const foldXPct = isCornerQuad && quad ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined
-    return {
-      businessName,
-      brandMode,
-      hasLogo: !!logoDataUrl,
-      referenceId,
-      lightingType,
-      fontStyle,
-      letterColor: primaryColor,
-      panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
-      panelBg:   isChannelLetter && hasBackground
-        ? (bgMaterial === "acrylic"
-            ? { name: bgColor.name, code: bgColor.code, hex: bgColor.hex, finish: bgAcrylicColor.finish }
-            : { name: bgColor.name, code: bgColor.code, hex: bgColor.hex })
-        : null,
-      hasBackground: isChannelLetter ? hasBackground : undefined,
-      bgMaterial: isChannelLetter && hasBackground ? bgMaterial : undefined,
-      acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
-      awningFrame: isAwning ? awningFrame : undefined,
-      fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
-      awningIllumination: isAwning ? awningIllumination : undefined,
-      isCorner: isCornerQuad,
-      foldXPct,
-    }
-  }
-
-  const currentPrompt = buildSignPrompt(buildPromptParams())
 
   async function runEstimate(q: QuadPoint[]) {
     if (!photoDataUrl) return
@@ -681,6 +598,19 @@ export default function NewOrderPage() {
       ...(colorSystem === "acrylic" && {
         acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish },
         channel_lighting: { type: lightingType },
+      }),
+      // New tree structure
+      sign_category: signCategory || undefined,
+      ...(signCategory === "letters" && {
+        is_lit: isLit,
+        lighting_style: lightingStyle,
+        light_warmth: lightWarmth,
+        light_colorful: lightColorful,
+      }),
+      ...(signCategory === "light_box" && {
+        light_box_type: lightBoxType,
+        light_box_shape: lightBoxShape,
+        is_perpendicular: isPerpendicular,
       }),
     }
 
@@ -888,13 +818,12 @@ export default function NewOrderPage() {
                     accept="image/*"
                     className="sr-only"
                     onChange={async e => {
-                      const file = e.target.files?.[0]
+                      const file = e.currentTarget.files?.[0]
                       if (!file) return
                       const reader = new FileReader()
                       reader.onload = async (ev) => {
                         const url = ev.target?.result as string
                         setLogoDataUrl(url)
-                        // Derive color (closest swatch) + format from the logo.
                         await applyLogoStyling(url)
                       }
                       reader.readAsDataURL(file)
@@ -916,476 +845,428 @@ export default function NewOrderPage() {
                 value={businessName}
                 onChange={async e => {
                   setBusinessName(e.target.value)
-                  // When a logo is already loaded, keep the sign color synced to it.
                   if (e.target.value && logoDataUrl) {
-                    const color = await extractDominantColor(logoDataUrl)
+                    const color = logoColorCacheRef.current?.url === logoDataUrl
+                      ? logoColorCacheRef.current.color
+                      : await extractDominantColor(logoDataUrl)
                     setPrimaryColor(color)
-                    setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
-                    const acrylicMatch = nearestColor(color, ACRYLIC_COLORS.filter(c => c.finish === acrylicFinish))
-                    if (acrylicMatch) setAcrylicColor(acrylicMatch)
                   }
                 }}
                 placeholder="e.g. Joe's Pizza"
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
-              {!businessName && !logoDataUrl && (
-                <p className="text-xs text-muted-foreground mt-1">Required if no logo is uploaded.</p>
-              )}
-              {brandMode !== "text-only" && (
-                <p className="text-xs text-muted-foreground mt-1">
-                  {brandMode === "logo-only" ? "Logo only — sign will display your logo." : "Logo + name — sign will display both."}
-                </p>
-              )}
             </div>
 
-            {/* ── Font style (only when a business name is on the sign) ── */}
-            {businessName.trim() && (
-              <div>
-                <label className="block text-sm font-medium mb-2">Font style</label>
-                <p className="text-xs text-muted-foreground mb-2">
-                  How the business name letters are shaped.
-                  {brandMode === "logo-and-text" && " Letter color is taken from your logo automatically."}
-                </p>
-                <div className="grid grid-cols-3 gap-2">
-                  {FONT_OPTIONS.map(f => {
-                    const active = fontStyle === f.id
-                    return (
-                      <button key={f.id} type="button" onClick={() => setFontStyle(f.id)}
-                        className={`flex flex-col items-center gap-1.5 rounded-lg border-2 px-3 py-3 transition-all
-                          ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                        <span className={`text-2xl font-bold
-                          ${f.id === "modern-sans" ? "font-sans" : f.id === "classic-serif" ? "font-serif" : "font-sans tracking-tighter"}`}>Aa</span>
-                        <span className={`text-xs ${active ? "text-accent font-medium" : "text-muted-foreground"}`}>{f.name}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* ── Sign style (reference styles, ported from webs/signs) ── */}
+            {/* ── MAIN: What kind of sign? ── */}
             <div>
-              <label className="block text-sm font-medium mb-2">Sign style *</label>
-              <p className="text-xs text-muted-foreground mb-3">Pick the construction & lighting style for your sign.</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                {REFERENCE_STYLES.map(ref => {
-                  const active = referenceId === ref.id
-                  return (
-                    <button key={ref.id} type="button" onClick={() => setReferenceId(ref.id)}
-                      className={`relative text-left rounded-xl border-2 overflow-hidden transition-all
-                        ${active ? "border-accent shadow-sm" : "border-border hover:border-accent/40"}`}>
-                      <div className="h-24 bg-muted overflow-hidden flex items-center justify-center">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img src={ref.imageUrl} alt={ref.name} className="w-full h-full object-cover"
-                          onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none" }} />
-                      </div>
-                      <div className="p-2.5">
-                        <p className="text-xs font-semibold">{ref.name}</p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">{ref.description}</p>
-                        <div className="flex gap-1 mt-1.5 flex-wrap">
-                          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium">{ref.lightingType}</span>
-                          <span className="text-[10px] bg-muted px-1.5 py-0.5 rounded font-medium">{ref.materialFeel}</span>
+              <label className="block text-sm font-medium mb-2">What kind of sign? *</label>
+              <div className="grid grid-cols-3 gap-2">
+                <PictureChoice
+                  imageSrc="/examples/sign-type/letters.jpg"
+                  label="Letters"
+                  description="Channel letters or flat-cut dimensional signage"
+                  selected={signCategory === "letters"}
+                  onClick={() => { setSignCategory("letters"); setIsLit(null) }}
+                />
+                <PictureChoice
+                  imageSrc="/examples/sign-type/light-box.jpg"
+                  label="Light Box"
+                  description="Backlit cabinet or see-through letters"
+                  selected={signCategory === "light_box"}
+                  onClick={() => setSignCategory("light_box")}
+                />
+                <PictureChoice
+                  imageSrc="/examples/sign-type/awning.jpg"
+                  label="Awning"
+                  description="Printed or lit fabric awning"
+                  selected={signCategory === "awning"}
+                  onClick={() => { setSignCategory("awning"); setAwningIllumination("none") }}
+                />
+              </div>
+            </div>
+
+            {/* ── LETTERS ── */}
+            {signCategory === "letters" && (
+              <>
+                {/* Background toggle */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Background panel</label>
+                  <label className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+                    <input type="checkbox" checked={hasBackground} onChange={e => setHasBackground(e.target.checked)} className="w-4 h-4 accent-accent mt-0.5" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium leading-tight">{hasBackground ? "With background panel" : "Letters only (no background)"}</p>
+                      <p className="text-xs text-muted-foreground leading-tight mt-0.5">{hasBackground ? "Letters on a finished backer panel" : "Letters mounted directly on the wall"}</p>
+                      <div className="mt-2 w-32 rounded-lg overflow-hidden bg-muted aspect-square relative">
+                        <img
+                          src={hasBackground ? "/examples/background/with-panel.jpg" : "/examples/background/letters-only.jpg"}
+                          alt={hasBackground ? "Letters with background panel" : "Letters only, no background"}
+                          className="w-full h-full object-cover"
+                          onError={e => { const img = e.currentTarget; img.style.display = "none"; const ph = img.nextElementSibling as HTMLElement | null; if (ph) ph.style.display = "flex" }}
+                        />
+                        <div className="hidden absolute inset-0 items-center justify-center bg-muted" aria-hidden="true">
+                          <span className="text-3xl text-muted-foreground/25">📷</span>
                         </div>
                       </div>
-                      {active && <span className="absolute top-2 right-2 text-accent text-lg drop-shadow">✓</span>}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
+                    </div>
+                  </label>
+                </div>
 
-            {/* ── Style-specific options ── */}
-            {isAwning ? (
-              <>
-                {/* Frame style with SVG icons */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Frame style</label>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Choose the awning profile shape. <span className="font-medium">Standard</span> is the most common for storefronts.
-                  </p>
-                  <div className="grid grid-cols-3 gap-2">
-                    {AWNING_FRAMES.map(f => {
-                      const active = awningFrame === f.value
-                      return (
+                {/* Background colors (right after toggle, when has_background) */}
+                {hasBackground && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Background color</label>
+                    <div className="grid grid-cols-6 gap-2 mb-3">
+                      {[
+                        DURABOND_COLORS.find(c => c.code === "DB-03"),
+                        DURABOND_COLORS.find(c => c.code === "DB-35"),
+                        DURABOND_COLORS.find(c => c.code === "DB-13"),
+                      ].filter(Boolean).map(c => (
                         <button
-                          key={f.value}
+                          key={c!.code}
                           type="button"
-                          onClick={() => setAwningFrame(f.value)}
-                          className={`rounded-lg border px-3 pt-2 pb-2 text-xs transition-colors text-left
-                            ${active ? "border-accent bg-accent/10" : "border-border hover:bg-muted/50"}`}
-                        >
-                          <AwningFrameIcon style={f.value} active={active} />
-                          <span className={`block font-medium leading-tight ${active ? "text-accent" : ""}`}>{f.label}</span>
-                          <span className="block text-[10px] text-muted-foreground mt-0.5 leading-tight">{f.desc}</span>
-                        </button>
-                      )
-                    })}
+                          onClick={() => setPanelBgColor(c!)}
+                          className={`aspect-square rounded-lg border-2 transition-all ${
+                            panelBgColor.code === c!.code ? "border-accent scale-105" : "border-border"
+                          }`}
+                          style={{ background: c!.hex }}
+                          title={c!.name}
+                        />
+                      ))}
+                    </div>
+                    <details className="text-xs">
+                      <summary className="cursor-pointer font-medium text-accent">Show all aluminum colors</summary>
+                      <div className="grid grid-cols-6 gap-2 mt-2">
+                        {DURABOND_COLORS.map(c => (
+                          <button
+                            key={c.code}
+                            type="button"
+                            onClick={() => setPanelBgColor(c)}
+                            className={`aspect-square rounded-lg border-2 transition-all ${
+                              panelBgColor.code === c.code ? "border-accent scale-105" : "border-border"
+                            }`}
+                            style={{ background: c.hex }}
+                            title={c.name}
+                          />
+                        ))}
+                      </div>
+                    </details>
+                  </div>
+                )}
+
+                {/* Lighting choice */}
+                <div>
+                  <label className="block text-sm font-medium mb-2">Will your sign be lit at night? *</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setIsLit(true)}
+                      className={`text-left rounded-lg border-2 p-3 transition-all ${
+                        isLit === true ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">Yes, with lighting</span>
+                      <span className="block text-[11px] text-muted-foreground mt-1">Glows at night for visibility and branding</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsLit(false)}
+                      className={`text-left rounded-lg border-2 p-3 transition-all ${
+                        isLit === false ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">No lighting</span>
+                      <span className="block text-[11px] text-muted-foreground mt-1">Daytime only or floodlit</span>
+                    </button>
                   </div>
                 </div>
 
-                {/* Sunbrella fabric color with progressive disclosure */}
+                {/* Lighting style (if lit) */}
+                {isLit === true && (
+                  <>
+                    <div>
+                      <label className="block text-sm font-medium mb-2">How should it be lit?</label>
+                      <p className="text-xs text-muted-foreground mb-3">Choose the lighting direction and style.</p>
+                      <div className={`grid gap-2 ${hasBackground ? "grid-cols-3" : "grid-cols-2"}`}>
+                        {!hasBackground ? (
+                          <>
+                            <PictureChoice imageSrc="/examples/letters-lighting-nobg/front.jpg" label="Front" description="Light on the face" selected={lightingStyle === "front"} onClick={() => setLightingStyle("front")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-nobg/back.jpg" label="Back" description="Halo glow behind" selected={lightingStyle === "back"} onClick={() => setLightingStyle("back")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-nobg/front_back.jpg" label="Front + Back" description="Light both ways" selected={lightingStyle === "front_back"} onClick={() => setLightingStyle("front_back")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-nobg/full.jpg" label="Full surround" description="All-around glow" selected={lightingStyle === "full"} onClick={() => setLightingStyle("full")} />
+                          </>
+                        ) : (
+                          <>
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/front.jpg" label="Front" description="Lit face only" selected={lightingStyle === "front"} onClick={() => setLightingStyle("front")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/back.jpg" label="Back" description="Panel glow" selected={lightingStyle === "back"} onClick={() => setLightingStyle("back")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/back_side.jpg" label="Back + Side" description="Back & side light" selected={lightingStyle === "back_side"} onClick={() => setLightingStyle("back_side")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/front_back.jpg" label="Front + Back" description="Both directions" selected={lightingStyle === "front_back"} onClick={() => setLightingStyle("front_back")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/front_side.jpg" label="Front + Side" description="Face & side glow" selected={lightingStyle === "front_side"} onClick={() => setLightingStyle("front_side")} />
+                            <PictureChoice imageSrc="/examples/letters-lighting-bg/full.jpg" label="Full light" description="All-around" selected={lightingStyle === "full"} onClick={() => setLightingStyle("full")} />
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Letter color (full acrylic palette) */}
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Letter color</label>
+                      <div className="grid grid-cols-6 gap-2">
+                        {ACRYLIC_COLORS.map(c => (
+                          <button
+                            key={`${c.code}-${c.finish}`}
+                            type="button"
+                            title={`${c.name} #${c.code}`}
+                            onClick={() => { setAcrylicColor(c); setPrimaryColor(c.hex) }}
+                            className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                              ${primaryColor === c.hex ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
+                          >
+                            <div className="w-full h-full" style={{ background: c.hex, opacity: c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1 }} />
+                            {primaryColor === c.hex && <div className="absolute inset-0 flex items-center justify-center"><span className="text-white text-sm drop-shadow">✓</span></div>}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Advanced: warmth + colorful */}
+                    <details className="border border-border rounded-xl overflow-hidden group">
+                      <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+                        <span>Advanced lighting settings</span>
+                        <span className="text-xs text-muted-foreground group-open:hidden">show</span>
+                        <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+                      </summary>
+                      <div className="px-4 pb-4 space-y-3">
+                        <div>
+                          <label className="block text-sm font-medium mb-2">Light warmth</label>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={lightWarmth}
+                            onChange={e => setLightWarmth(parseInt(e.target.value))}
+                            className="w-full"
+                          />
+                          <div className="flex justify-between text-xs text-muted-foreground mt-1">
+                            <span>Cool</span>
+                            <span>Neutral</span>
+                            <span>Warm</span>
+                          </div>
+                        </div>
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={lightColorful}
+                            onChange={e => setLightColorful(e.target.checked)}
+                            className="w-4 h-4 accent-accent"
+                          />
+                          <span className="text-sm font-medium">Multicolor RGB LED (programmable colors)</span>
+                        </label>
+                      </div>
+                    </details>
+                  </>
+                )}
+
+                {/* Letter color (aluminum only, if no light) */}
+                {isLit === false && (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Letter color</label>
+                    <div className="grid grid-cols-6 gap-2">
+                      {DURABOND_COLORS.map(c => (
+                        <button
+                          key={c.code}
+                          type="button"
+                          title={c.name}
+                          onClick={() => { setPanelFaceColor(c); setPrimaryColor(c.hex) }}
+                          className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                            ${primaryColor === c.hex ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
+                        >
+                          <div className="w-full h-full" style={{ background: c.hex }} />
+                          {primaryColor === c.hex && <div className="absolute inset-0 flex items-center justify-center"><span className="text-white text-sm drop-shadow">✓</span></div>}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+              </>
+            )}
+
+            {/* ── LIGHT BOX ── */}
+            {signCategory === "light_box" && (
+              <>
                 <div>
-                  <label className="block text-sm font-medium mb-1">Sunbrella® fabric color</label>
-                  <p className="text-xs text-muted-foreground mb-3">
-                    Commercial-grade awning fabric — 10-yr warranty, UV &amp; weather resistant.
-                    Selected: <span className="font-medium">{awningFabric.name}</span>
-                    <span className="text-muted-foreground"> · #{awningFabric.code}</span>
-                  </p>
+                  <label className="block text-sm font-medium mb-2">Style</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <PictureChoice
+                      imageSrc="/examples/lightbox-type/cabinet.jpg"
+                      label="Cabinet"
+                      description="Backlit box with cutout letters"
+                      selected={lightBoxType === "cabinet"}
+                      onClick={() => setLightBoxType("cabinet")}
+                      recommended
+                    />
+                    <PictureChoice
+                      imageSrc="/examples/lightbox-type/seethrough.jpg"
+                      label="See-through letters"
+                      description="Transparent letters on a lit panel"
+                      selected={lightBoxType === "seethrough_letters"}
+                      onClick={() => setLightBoxType("seethrough_letters")}
+                    />
+                  </div>
+                </div>
+
+                {/* Perpendicular (blade) mounting toggle */}
+                <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={isPerpendicular}
+                    onChange={e => setIsPerpendicular(e.target.checked)}
+                    className="w-4 h-4 accent-accent"
+                  />
+                  <div>
+                    <p className="text-sm font-medium leading-tight">Wall-mounted perpendicular (blade sign)</p>
+                    <p className="text-xs text-muted-foreground leading-tight mt-0.5">Sign sticks out from the wall instead of sitting flush against it.</p>
+                    <div className="mt-2 w-32 rounded-lg overflow-hidden bg-muted aspect-square relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src="/examples/lightbox-mount/perpendicular.jpg"
+                        alt="Perpendicular blade sign example"
+                        className="w-full h-full object-cover"
+                        onError={e => {
+                          e.currentTarget.style.display = "none"
+                          const ph = e.currentTarget.nextElementSibling as HTMLElement | null
+                          if (ph) ph.style.display = "flex"
+                        }}
+                      />
+                      <div className="hidden absolute inset-0 items-center justify-center">
+                        <span className="text-3xl text-muted-foreground/25">📷</span>
+                      </div>
+                    </div>
+                  </div>
+                </label>
+
+                <details className="border border-border rounded-xl overflow-hidden group">
+                  <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+                    <span>Advanced settings</span>
+                    <span className="text-xs text-muted-foreground group-open:hidden">show</span>
+                    <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+                  </summary>
+                  <div className="px-4 pb-4 space-y-3">
+                    <div>
+                      <label className="block text-sm font-medium mb-2">Shape (optional)</label>
+                      <div className="grid grid-cols-5 gap-2">
+                        {["rectangle", "circle", "oval", "rounded", "logo"].map(shape => (
+                          <PictureChoice
+                            key={shape}
+                            imageSrc={`/examples/lightbox-shape/${shape}.jpg`}
+                            label={shape === "logo" ? "Your logo" : shape.charAt(0).toUpperCase() + shape.slice(1)}
+                            selected={lightBoxShape === shape}
+                            onClick={() => setLightBoxShape(shape)}
+                            compact
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                </details>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Color</label>
                   <div className="grid grid-cols-6 gap-2">
-                    {visibleColors.map(c => (
+                    {(lightBoxType === "cabinet" ? ACRYLIC_COLORS : DURABOND_COLORS).map(c => (
+                      <button
+                        key={("code" in c) ? c.code : ""}
+                        type="button"
+                        onClick={() => setPrimaryColor(c.hex)}
+                        className={`aspect-square rounded-lg border-2 transition-all ${
+                          primaryColor === c.hex ? "border-accent scale-105" : "border-transparent hover:border-border"
+                        }`}
+                        style={{ background: c.hex, opacity: ("finish" in c && c.finish === "translucent") ? 0.75 : 1 }}
+                        title={c.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* ── AWNING ── */}
+            {signCategory === "awning" && (
+              <>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Will it be lit at night?</label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <PictureChoice
+                      imageSrc="/examples/awning-lighting/night.jpg"
+                      label="With lighting"
+                      description="Glows at night"
+                      selected={awningIllumination === "internal_led"}
+                      onClick={() => setAwningIllumination("internal_led")}
+                      recommended
+                    />
+                    <PictureChoice
+                      imageSrc="/examples/awning-lighting/day.jpg"
+                      label="No light"
+                      description="Daytime only"
+                      selected={awningIllumination === "none"}
+                      onClick={() => setAwningIllumination("none")}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium mb-2">Fabric color (Sunbrella)</label>
+                  <div className="grid grid-cols-6 gap-2">
+                    {SUNBRELLA_COLORS.filter(c => c.common).map(c => (
                       <button
                         key={c.code}
                         type="button"
-                        title={`${c.name} (${c.code})`}
                         onClick={() => setAwningFabric(c)}
-                        className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                          ${awningFabric.code === c.code ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
-                      >
-                        <div className="w-full h-full" style={{ background: c.hex }} />
-                        <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                          <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
-                        </div>
-                        {awningFabric.code === c.code && (
-                          <div className="absolute inset-0 flex items-center justify-center">
-                            <span className="text-white text-sm drop-shadow">✓</span>
-                          </div>
-                        )}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Show all / show fewer toggle */}
-                  <button
-                    type="button"
-                    onClick={() => setShowAllColors(v => !v)}
-                    className="mt-3 text-xs text-accent font-medium hover:underline flex items-center gap-1"
-                  >
-                    {showAllColors
-                      ? `Show fewer ▴`
-                      : `Show all ${SUNBRELLA_COLORS.length} colors ▾`}
-                  </button>
-
-                  {/* Selected swatch summary */}
-                  <div className="mt-2 flex items-center gap-2">
-                    <div className="w-5 h-5 rounded border border-border flex-shrink-0" style={{ background: awningFabric.hex }} />
-                    <span className="text-sm font-medium">{awningFabric.name}</span>
-                    <span className="text-xs text-muted-foreground">Sunbrella® {awningFabric.code}</span>
-                  </div>
-                </div>
-
-                {/* Awning illumination — 2 options only */}
-                <div>
-                  <label className="block text-sm font-medium mb-2">Lighting</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {AWNING_LIGHTING.map(o => (
-                      <button
-                        key={o.value}
-                        type="button"
-                        onClick={() => setAwningIllumination(o.value)}
-                        className={`text-left rounded-lg border px-3 py-2.5 text-xs transition-colors
-                          ${awningIllumination === o.value ? "border-accent bg-accent/10 font-medium" : "border-border hover:bg-muted/50"}`}
-                      >
-                        <span className="block font-medium">{o.label}</span>
-                        <span className="block text-[10px] text-muted-foreground mt-0.5">{o.desc}</span>
-                      </button>
+                        className={`aspect-square rounded-lg border-2 transition-all ${
+                          awningFabric.code === c.code ? "border-accent scale-105" : "border-transparent hover:border-border"
+                        }`}
+                        style={{ background: c.hex }}
+                        title={c.name}
+                      />
                     ))}
                   </div>
                 </div>
-              </>
-            ) : (
-              <>
-                {/* ── Lighting (determined by the chosen sign style) ── */}
-                <div className="flex items-center gap-2 text-xs bg-muted/40 border border-border rounded-lg px-3 py-2.5">
-                  <span>💡</span>
-                  <span className="text-muted-foreground">
-                    Lighting comes with your sign style —{" "}
-                    <span className="font-medium text-foreground">
-                      {referenceId === "no-light-outdoor"
-                        ? "no illumination (daytime / floodlit)"
-                        : selectedReference.lightingType === "front" ? "front-lit (glowing faces)"
-                        : selectedReference.lightingType === "back" ? "back-lit halo glow"
-                        : "front + back lit"}
-                    </span>
-                  </span>
-                </div>
 
-                {/* ── Material choice (acrylic vs aluminum) ── */}
-                <div>
-                  <label className="block text-sm font-medium mb-1">Material</label>
-                  <p className="text-xs text-muted-foreground mb-2">
-                    Acrylic is more affordable; aluminum is more durable and premium. Default is acrylic.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {SIGN_MATERIALS.map(m => {
-                      const active = signMaterial === m.value
-                      return (
-                        <button key={m.value} type="button" onClick={() => setSignMaterial(m.value)}
-                          className={`text-left rounded-lg border-2 p-3 transition-all
-                            ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                          <div className="flex items-center justify-between mb-1">
-                            <span className={`text-sm font-semibold ${active ? "text-accent" : ""}`}>{m.label}</span>
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ${m.costTone}`}>{m.cost}</span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground leading-snug">{m.desc}</p>
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-
-                {/* ── Dura-Bond ACP colors (aluminum) ── */}
-                {colorSystem === "durabond" && (
-                  <PanelColorPicker
-                    label="Letter face color (Dura-Bond ACP)"
-                    subtitle="Color of the letter/panel face"
-                    selected={panelFaceColor}
-                    onSelect={setPanelFaceColor}
-                    visible={visiblePanelFace}
-                    showAll={showAllPanelFace}
-                    onToggleAll={() => setShowAllPanelFace(v => !v)}
-                    total={DURABOND_COLORS.length}
-                  />
-                )}
-
-                {/* ── Dura-Cast® Acrylic finish + color (illuminated styles) ── */}
-                {colorSystem === "acrylic" && (
-                  <div>
-                    {/* Finish selector (client choice) */}
-                    <label className="block text-sm font-medium mb-1">Dura-Cast® acrylic finish</label>
-                    <p className="text-xs text-muted-foreground mb-2">Pick how the face behaves with light, then choose a color.</p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                      {ACRYLIC_FINISHES.map(f => {
-                        const active = acrylicFinish === f.value
-                        return (
-                          <button key={f.value} type="button" onClick={() => chooseAcrylicFinish(f.value)}
-                            className={`text-left rounded-lg border-2 p-2.5 transition-all
-                              ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                            <span className="flex items-center gap-1.5 mb-0.5">
-                              <span className="font-mono text-[11px] font-bold bg-muted rounded px-1">{f.badge}</span>
-                              <span className={`text-xs font-semibold ${active ? "text-accent" : ""}`}>{f.label}</span>
-                            </span>
-                            <span className="block text-[10px] text-muted-foreground leading-snug">{f.desc}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-
-                    <label className="block text-sm font-medium mb-2">
-                      {ACRYLIC_FINISHES.find(f => f.value === acrylicFinish)?.label} face color
-                    </label>
-                    <div className="grid grid-cols-6 gap-2">
-                      {visibleAcrylic.map(c => {
-                        const finishBadge = c.finish === "translucent" ? "T" : c.finish === "opaque" ? "O" : c.finish === "transparent" ? "◇" : "M"
-                        const opacity = c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1
-                        return (
-                          <button key={`${c.code}-${c.finish}`} type="button"
-                            title={`${c.name} #${c.code} — ${c.finish}`}
-                            onClick={() => setAcrylicColor(c)}
-                            className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                              ${acrylicColor.code === c.code && acrylicColor.finish === c.finish ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
-                            <div className="w-full h-full" style={{ background: c.hex, opacity }} />
-                            <div className="absolute inset-0 flex items-start justify-end p-0.5">
-                              <span className="text-[8px] bg-white/80 text-foreground rounded px-0.5 leading-tight font-bold">{finishBadge}</span>
-                            </div>
-                            <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                              <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
-                            </div>
-                            {acrylicColor.code === c.code && acrylicColor.finish === c.finish && (
-                              <div className="absolute inset-0 flex items-center justify-center">
-                                <span className="text-white text-sm drop-shadow">✓</span>
-                              </div>
-                            )}
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <div className="mt-3 flex items-center gap-2">
-                      <div className="w-5 h-5 rounded border border-border flex-shrink-0"
-                        style={{ background: acrylicColor.hex, opacity: acrylicColor.finish === "translucent" ? 0.75 : acrylicColor.finish === "transparent" ? 0.55 : 1 }} />
-                      <span className="text-sm font-medium">{acrylicColor.name}</span>
-                      <span className="text-xs text-muted-foreground">#{acrylicColor.code}</span>
-                      <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
+                <details className="border border-border rounded-xl overflow-hidden group">
+                  <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+                    <span>Frame style (advanced)</span>
+                    <span className="text-xs text-muted-foreground group-open:hidden">show</span>
+                    <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+                  </summary>
+                  <div className="px-4 pb-4">
+                    <div className="grid grid-cols-3 gap-2">
+                      {AWNING_FRAMES.map(f => (
+                        <PictureChoice
+                          key={f.value}
+                          imageSrc={`/examples/awning-frames/${f.value}.jpg`}
+                          label={f.label}
+                          selected={awningFrame === f.value}
+                          onClick={() => setAwningFrame(f.value)}
+                          compact
+                        />
+                      ))}
                     </div>
                   </div>
-                )}
-
-                {/* ── Background panel: letters with a backdrop vs mounted on the wall ── */}
-                {/* Always show when a logo is present — user must choose background color. */}
-                {(isChannelLetter || !!logoDataUrl) && !isAwning && (
-                  <div>
-                    <label className="block text-sm font-medium mb-1">Background</label>
-                    <p className="text-xs text-muted-foreground mb-3">
-                      Most storefront walls aren&apos;t a clean backdrop on their own. A background panel sits behind your
-                      letters so they read crisply and look finished — that&apos;s why it&apos;s the default. Choose{" "}
-                      <span className="font-medium">Letters only</span> if your wall already looks great (clean brick,
-                      smooth stucco, nice stone) and you want the letters mounted straight onto it.
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <button type="button" onClick={() => setHasBackground(true)}
-                        className={`text-left rounded-lg border-2 p-3 transition-all
-                          ${hasBackground ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className={`text-sm font-semibold ${hasBackground ? "text-accent" : ""}`}>With background</span>
-                          <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700">Recommended</span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground leading-snug">Letters mounted on a finished backer panel — clean, professional, hides an uneven wall.</p>
-                      </button>
-                      <button type="button" onClick={() => setHasBackground(false)}
-                        className={`text-left rounded-lg border-2 p-3 transition-all
-                          ${!hasBackground ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                        <span className={`block text-sm font-semibold mb-1 ${!hasBackground ? "text-accent" : ""}`}>Letters only</span>
-                        <p className="text-[11px] text-muted-foreground leading-snug">Letters mounted directly on the wall — best when the wall itself looks great.</p>
-                      </button>
-                    </div>
-
-                    {hasBackground && (
-                      <div className="mt-4 space-y-4">
-                        {/* Backer panel material */}
-                        <div>
-                          <label className="block text-sm font-medium mb-1">Background material</label>
-                          <p className="text-xs text-muted-foreground mb-2">
-                            Aluminum composite is the durable standard backer; acrylic is a smooth solid panel that pairs naturally with acrylic letters.
-                          </p>
-                          <div className="grid grid-cols-2 gap-2">
-                            <button type="button" onClick={() => setBgMaterial("aluminum")}
-                              className={`text-left rounded-lg border-2 p-3 transition-all
-                                ${bgMaterial === "aluminum" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                              <span className={`block text-sm font-semibold mb-0.5 ${bgMaterial === "aluminum" ? "text-accent" : ""}`}>Aluminum (Dura-Bond)</span>
-                              <span className="block text-[11px] text-muted-foreground leading-snug">Rigid ACM panel — most durable, fully weatherproof.</span>
-                            </button>
-                            <button type="button" onClick={() => setBgMaterial("acrylic")}
-                              className={`text-left rounded-lg border-2 p-3 transition-all
-                                ${bgMaterial === "acrylic" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                              <span className={`block text-sm font-semibold mb-0.5 ${bgMaterial === "acrylic" ? "text-accent" : ""}`}>Acrylic</span>
-                              <span className="block text-[11px] text-muted-foreground leading-snug">Smooth solid acrylic panel — matches acrylic letters.</span>
-                            </button>
-                          </div>
-                        </div>
-
-                        {/* Backer panel color — palette follows the material */}
-                        {bgMaterial === "aluminum" ? (
-                          <PanelColorPicker
-                            label="Background panel color (Dura-Bond ACP)"
-                            subtitle="Color of the backer panel behind the letters"
-                            selected={panelBgColor}
-                            onSelect={setPanelBgColor}
-                            visible={visiblePanelBg}
-                            showAll={showAllPanelBg}
-                            onToggleAll={() => setShowAllPanelBg(v => !v)}
-                            total={DURABOND_COLORS.length}
-                          />
-                        ) : (
-                          <div>
-                            {/* Acrylic backer finish */}
-                            <label className="block text-sm font-medium mb-1">Acrylic backer finish</label>
-                            <p className="text-xs text-muted-foreground mb-2">
-                              Opaque is the usual solid backer; translucent glows with the sign&apos;s lighting.
-                            </p>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                              {ACRYLIC_FINISHES.map(f => {
-                                const active = bgAcrylicFinish === f.value
-                                return (
-                                  <button key={f.value} type="button" onClick={() => chooseBgAcrylicFinish(f.value)}
-                                    className={`text-left rounded-lg border-2 p-2.5 transition-all
-                                      ${active ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"}`}>
-                                    <span className="flex items-center gap-1.5 mb-0.5">
-                                      <span className="font-mono text-[11px] font-bold bg-muted rounded px-1">{f.badge}</span>
-                                      <span className={`text-xs font-semibold ${active ? "text-accent" : ""}`}>{f.label}</span>
-                                    </span>
-                                    <span className="block text-[10px] text-muted-foreground leading-snug">{f.desc}</span>
-                                  </button>
-                                )
-                              })}
-                            </div>
-
-                            <label className="block text-sm font-medium mb-1">
-                              {ACRYLIC_FINISHES.find(f => f.value === bgAcrylicFinish)?.label} backer color
-                            </label>
-                            <p className="text-xs text-muted-foreground mb-3">
-                              Selected: <span className="font-medium">{bgAcrylicColor.name}</span>
-                              <span className="text-muted-foreground"> · #{bgAcrylicColor.code}</span>
-                            </p>
-                            <div className="grid grid-cols-6 gap-2">
-                              {bgAcrylicOptions.map(c => {
-                                const isSelected = c.code === bgAcrylicColor.code
-                                const opacity = c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1
-                                return (
-                                  <button key={c.code} type="button" title={`${c.name} #${c.code} — ${c.finish}`}
-                                    onClick={() => setBgAcrylicColor(c)}
-                                    className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                                      ${isSelected ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
-                                    <div className="w-full h-full" style={{ background: c.hex, opacity }} />
-                                    <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                                      <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
-                                    </div>
-                                    {isSelected && (
-                                      <div className="absolute inset-0 flex items-center justify-center">
-                                        <span className="text-white text-sm drop-shadow">✓</span>
-                                      </div>
-                                    )}
-                                  </button>
-                                )
-                              })}
-                            </div>
-                            <div className="mt-2 flex items-center gap-2">
-                              <div className="w-5 h-5 rounded border border-border flex-shrink-0"
-                                style={{ background: bgAcrylicColor.hex, opacity: bgAcrylicColor.finish === "translucent" ? 0.75 : bgAcrylicColor.finish === "transparent" ? 0.55 : 1 }} />
-                              <span className="text-sm font-medium">{bgAcrylicColor.name}</span>
-                              <span className="text-xs text-muted-foreground">#{bgAcrylicColor.code}</span>
-                              <span className="text-xs text-accent capitalize">{bgAcrylicColor.finish}</span>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {/* ── Logo color note (Case C) ── */}
-                {brandMode === "logo-and-text" && (
-                  <div className="flex items-center gap-2 text-xs bg-accent/5 border border-accent/30 rounded-lg px-3 py-2.5">
-                    <span>🎨</span>
-                    <span className="text-muted-foreground">
-                      Letter color is sampled automatically from your logo for a unified brand look.
-                    </span>
-                  </div>
-                )}
+                </details>
               </>
             )}
 
+            {/* Notes (always visible) */}
             <div>
               <label className="block text-sm font-medium mb-2">Additional notes <span className="text-muted-foreground font-normal">(optional)</span></label>
               <textarea
                 value={notes}
                 onChange={e => setNotes(e.target.value)}
                 rows={3}
-                placeholder="Special requirements, logo integration, mounting preferences…"
+                placeholder="Special requirements, preferences…"
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none"
               />
             </div>
           </div>
-
-          {/* ── AI prompt preview (exactly what gets sent to the image model) ── */}
-          <details className="border border-border rounded-xl bg-muted/20 overflow-hidden group" open>
-            <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
-              <span className="flex items-center gap-2">🤖 AI prompt preview</span>
-              <span className="text-xs text-muted-foreground group-open:hidden">show</span>
-              <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
-            </summary>
-            <div className="px-4 pb-4 space-y-2">
-              <p className="text-xs text-muted-foreground">
-                This is the exact instruction sent to the AI to render your sign. Adjust the options above and it updates live.
-              </p>
-              <pre className="text-xs whitespace-pre-wrap leading-relaxed bg-background border border-border rounded-lg p-3 font-mono text-foreground/90 max-h-56 overflow-auto">{currentPrompt}</pre>
-              <button
-                type="button"
-                onClick={() => navigator.clipboard?.writeText(currentPrompt)}
-                className="text-xs text-accent font-medium hover:underline"
-              >
-                Copy prompt
-              </button>
-            </div>
-          </details>
 
           <div className="flex gap-3">
             <button onClick={() => setStep("quad")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
@@ -1393,7 +1274,7 @@ export default function NewOrderPage() {
             </button>
             <button
               onClick={() => { setStep("preview"); runPreview() }}
-              disabled={!hasBrandInput}
+              disabled={!businessName || !signCategory || (signCategory === "letters" && isLit === null)}
               className="flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               Continue → AI Preview
@@ -1401,8 +1282,6 @@ export default function NewOrderPage() {
           </div>
         </div>
       )}
-
-      {/* ── Step 4: AI Preview ── */}
       {step === "preview" && (
         <div className="space-y-6">
           <div>

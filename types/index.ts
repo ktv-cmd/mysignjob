@@ -90,11 +90,23 @@ export interface SignSpec {
   is_corner?: boolean
   front_width_inches?: number  // face 1 width (corner signs only)
   side_width_inches?: number   // face 2 width (corner signs only)
-  // Awning-specific (only when sign_type === "awning")
+  // Top-level category (new tree: letters | light_box | awning)
+  sign_category?: "letters" | "light_box" | "awning"
+  // Letters-specific
+  is_lit?: boolean | null       // null = unset (must choose), true = with light, false = no light
+  lighting_style?: "front" | "back" | "back_side" | "front_back" | "front_side" | "full"  // only when is_lit = true
+  // Light box-specific
+  light_box_type?: "cabinet" | "seethrough_letters"
+  light_box_shape?: string      // e.g. "rectangle", "circle", "oval", "rounded"
+  is_perpendicular?: boolean    // wall-mounted perpendicular (blade sign); default false = flush to wall
+  // Advanced lighting (when is_lit = true)
+  light_warmth?: number         // 0-100, default 50 (cool←→warm); null/undefined = default
+  light_colorful?: boolean      // Multicolor RGB mode; default false
+  // Awning-specific (only when sign_category === "awning")
   awning_frame_style?: AwningFrameStyle
   awning_fabric?: SunbrellaFabric
   // Reference style (webs/signs structure) + typography
-  reference_style?: string  // front-lid | back-front-lid | back-lit | light-box | no-light-outdoor | awning
+  reference_style?: string  // derived from sign_category + choices; front-lit | back-lit | light-box-seethrough | no-light-outdoor | awning
   font_style?: string       // modern-sans | classic-serif | bold-condensed
   // Brand / logo
   brand_mode?: "text-only" | "logo-only" | "logo-and-text"
