@@ -131,6 +131,13 @@ export interface SignSpec {
   panel_bg_color?: { name: string; code: string; hex: string; finish?: string }  // backer panel color (+ acrylic finish)
   acrylic_color?: { name: string; code: string; hex: string; finish: "translucent" | "opaque" | "transparent" | "matte" }
   channel_lighting?: { type: string; return_glow?: string }
+  // ─── Job requirements (installation + insurance) ───────────────────────────
+  // Captured at quote time; these drive what the SC bids on.
+  needs_installation?: boolean       // true = SC installs; false = client installs it themselves (fabricate-only)
+  // Certificate of Insurance the building/landlord requires from the installer.
+  // Only meaningful when needs_installation = true (self-install = client's own concern).
+  coi_required?: boolean | null      // null = client isn't sure (SC to confirm)
+  coi_amount?: number                // required general-liability coverage in dollars, e.g. 1_000_000
 }
 
 // ─── Orders ──────────────────────────────────────────────────────────────────

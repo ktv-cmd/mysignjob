@@ -258,6 +258,10 @@ export default function NewOrderPage() {
   const [primaryColor, setPrimaryColor] = useState("#1C1C1C") // letter color
   const [secondaryColor, setSecondaryColor] = useState("")
   const [notes, setNotes] = useState("")
+  // Job requirements (asked on the review step, before the job goes out for quotes)
+  const [needsInstallation, setNeedsInstallation] = useState<boolean | null>(null)
+  const [coiRequired, setCoiRequired] = useState<"yes" | "no" | "unsure" | null>(null)
+  const [coiAmount, setCoiAmount] = useState<number | null>(null)
   // Awning-specific
   const [awningFrame, setAwningFrame] = useState<AwningFrameStyle>("waterfall")
   const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
@@ -558,8 +562,14 @@ export default function NewOrderPage() {
     setStep(s)
   }
 
+  // Installation choice is required; if the SC installs and insurance is required,
+  // a coverage amount must be set before the job can go out for quotes.
+  const requirementsComplete =
+    needsInstallation !== null &&
+    !(needsInstallation === true && coiRequired === "yes" && coiAmount == null)
+
   function handleSubmit() {
-    if (!photoDataUrl || !quad || !sizeResult || !hasBrandInput) return
+    if (!photoDataUrl || !quad || !sizeResult || !hasBrandInput || !requirementsComplete) return
     setSubmitError(null)
 
     const signSpec: SignSpec = {
@@ -608,6 +618,12 @@ export default function NewOrderPage() {
       ...(colorSystem === "acrylic" && {
         acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish },
         channel_lighting: { type: lightingType },
+      }),
+      // Job requirements (installation + insurance)
+      ...(needsInstallation !== null && { needs_installation: needsInstallation }),
+      ...(needsInstallation === true && coiRequired && {
+        coi_required: coiRequired === "yes" ? true : coiRequired === "no" ? false : null,
+        ...(coiRequired === "yes" && coiAmount != null && { coi_amount: coiAmount }),
       }),
       // New tree structure
       sign_category: signCategory || undefined,
@@ -1466,6 +1482,96 @@ export default function NewOrderPage() {
             <p className="text-muted-foreground mt-1">Your order will be sent to sign companies for quotes.</p>
           </div>
 
+          {/* ── Installation ── */}
+          <div>
+            <label className="block text-sm font-medium mb-2">Do you need installation? *</label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setNeedsInstallation(true)}
+                className={`text-left rounded-lg border-2 p-3 transition-all ${
+                  needsInstallation === true ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                }`}
+              >
+                <span className="block text-sm font-semibold">Install it for me</span>
+                <span className="block text-[11px] text-muted-foreground mt-1">The sign company fabricates and mounts it on your building.</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNeedsInstallation(false); setCoiRequired(null); setCoiAmount(null) }}
+                className={`text-left rounded-lg border-2 p-3 transition-all ${
+                  needsInstallation === false ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                }`}
+              >
+                <span className="block text-sm font-semibold">I&apos;ll install it myself</span>
+                <span className="block text-[11px] text-muted-foreground mt-1">The sign company fabricates and ships it; you handle mounting.</span>
+              </button>
+            </div>
+
+            {/* Soft, non-blocking nudge for self-install */}
+            {needsInstallation === false && (
+              <p className="mt-2 text-xs text-muted-foreground rounded-lg bg-muted/40 px-3 py-2">
+                Heads up — many landlords require proof of insurance even for tenant-arranged installs. Check your lease; if so, we can install it for you instead.
+              </p>
+            )}
+          </div>
+
+          {/* ── Insurance (only when the SC installs) ── */}
+          {needsInstallation === true && (
+            <div>
+              <label className="block text-sm font-medium mb-2">Does your building require the installer to be insured?</label>
+              <p className="text-xs text-muted-foreground mb-2">Many commercial landlords require a Certificate of Insurance (COI) from whoever installs the sign.</p>
+              <div className="grid grid-cols-3 gap-3">
+                {([["yes", "Yes"], ["no", "No"], ["unsure", "Not sure"]] as const).map(([val, label]) => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => { setCoiRequired(val); if (val !== "yes") setCoiAmount(null) }}
+                    className={`rounded-lg border-2 p-2.5 text-sm font-medium transition-all ${
+                      coiRequired === val ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {coiRequired === "unsure" && (
+                <p className="mt-2 text-xs text-muted-foreground rounded-lg bg-muted/40 px-3 py-2">
+                  No problem — the sign company can confirm the requirement with you before work begins.
+                </p>
+              )}
+
+              {coiRequired === "yes" && (
+                <div className="mt-3">
+                  <label className="block text-sm font-medium mb-2">Required coverage amount</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[1_000_000, 2_000_000, 5_000_000].map(amt => (
+                      <button
+                        key={amt}
+                        type="button"
+                        onClick={() => setCoiAmount(amt)}
+                        className={`rounded-lg border-2 py-2 text-sm font-medium transition-all ${
+                          coiAmount === amt ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                        }`}
+                      >
+                        ${amt / 1_000_000}M
+                      </button>
+                    ))}
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      placeholder="Custom $"
+                      value={coiAmount != null && ![1_000_000, 2_000_000, 5_000_000].includes(coiAmount) ? coiAmount : ""}
+                      onChange={e => setCoiAmount(e.target.value ? parseInt(e.target.value) : null)}
+                      className="rounded-lg border-2 border-border px-2 text-sm focus:outline-none focus:border-accent/40 min-w-0"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="border border-border rounded-xl divide-y divide-border">
             <Row label="Business name" value={businessName} />
             <Row label="Sign style" value={
@@ -1540,6 +1646,16 @@ export default function NewOrderPage() {
               </>
             )}
             {notes && <Row label="Notes" value={notes} />}
+            {needsInstallation !== null && (
+              <Row label="Installation" value={needsInstallation ? "Sign company installs" : "Self-install (fabricate only)"} />
+            )}
+            {needsInstallation === true && coiRequired && (
+              <Row label="Installer insurance" value={
+                coiRequired === "yes" ? (coiAmount ? `Required · $${(coiAmount / 1_000_000).toLocaleString()}M coverage` : "Required")
+                : coiRequired === "no" ? "Not required"
+                : "Client unsure — SC to confirm"
+              } />
+            )}
             <Row label="AI preview" value={previewDataUrl ? "Included ✓" : previewSkipped ? "Not available for this type" : "Not generated"} />
           </div>
 
@@ -1557,7 +1673,7 @@ export default function NewOrderPage() {
             </button>
             <button
               onClick={handleSubmit}
-              disabled={submitting}
+              disabled={submitting || !requirementsComplete}
               className="flex-1 bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
             >
               {submitting ? "Submitting…" : "Submit for Quotes →"}
