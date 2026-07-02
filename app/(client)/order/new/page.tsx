@@ -7,8 +7,9 @@ import { saveGuestProfile } from "@/app/actions/auth"
 import PhotoUpload from "@/components/order/PhotoUpload"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
+import { analyzeLogoComplexity } from "@/app/actions/logo"
 import { formatDimensions } from "@/lib/utils"
-import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
+import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric, LogoAnalysis } from "@/types"
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
@@ -249,6 +250,11 @@ export default function NewOrderPage() {
   const [fontStyle, setFontStyle] = useState<FontStyle>("modern-sans")
   const [businessName, setBusinessName] = useState("")
   const [logoDataUrl, setLogoDataUrl] = useState<string | null>(null)
+  // Client-confirmed: does the uploaded logo already render the business name?
+  // If so, we show logo-only (never duplicate the name on the sign).
+  const [logoIncludesName, setLogoIncludesName] = useState(false)
+  const [logoAnalysis, setLogoAnalysis] = useState<LogoAnalysis | null>(null)
+  const [logoAnalyzing, setLogoAnalyzing] = useState(false)
   const [primaryColor, setPrimaryColor] = useState("#1C1C1C") // letter color
   const [secondaryColor, setSecondaryColor] = useState("")
   const [notes, setNotes] = useState("")
@@ -322,8 +328,10 @@ export default function NewOrderPage() {
 
   const stepIdx = STEPS.indexOf(step)
 
+  // logoIncludesName only matters when both a logo and a name are present — if the
+  // logo art already spells out the business name, don't render the name a second time.
   const brandMode: "text-only" | "logo-only" | "logo-and-text" =
-    logoDataUrl && businessName ? "logo-and-text"
+    logoDataUrl && businessName ? (logoIncludesName ? "logo-only" : "logo-and-text")
     : logoDataUrl               ? "logo-only"
     :                             "text-only"
 
@@ -580,6 +588,8 @@ export default function NewOrderPage() {
         awning_fabric: awningFabric,
       }),
       brand_mode: brandMode,
+      ...(logoDataUrl && businessName && { logo_includes_name: logoIncludesName }),
+      ...(logoAnalysis && { logo_analysis: logoAnalysis }),
       ...(!isAwning && { font_style: fontStyle }),
       ...(isChannelLetter && {
         has_background: hasBackground,
@@ -800,7 +810,11 @@ export default function NewOrderPage() {
                   <span className="flex-1 text-sm text-foreground font-medium">Logo uploaded</span>
                   <button
                     type="button"
-                    onClick={() => setLogoDataUrl(null)}
+                    onClick={() => {
+                      setLogoDataUrl(null)
+                      setLogoIncludesName(false)
+                      setLogoAnalysis(null)
+                    }}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
                     Remove
@@ -824,7 +838,12 @@ export default function NewOrderPage() {
                       reader.onload = async (ev) => {
                         const url = ev.target?.result as string
                         setLogoDataUrl(url)
-                        await applyLogoStyling(url)
+                        setLogoAnalyzing(true)
+                        await Promise.all([
+                          applyLogoStyling(url),
+                          analyzeLogoComplexity(url).then(setLogoAnalysis).catch(() => setLogoAnalysis(null)),
+                        ])
+                        setLogoAnalyzing(false)
                       }
                       reader.readAsDataURL(file)
                     }}
@@ -857,6 +876,26 @@ export default function NewOrderPage() {
               />
             </div>
 
+            {/* Only relevant when both a logo and a name exist — does the logo already spell out the name? */}
+            {logoDataUrl && businessName && (
+              <label className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={logoIncludesName}
+                  onChange={e => setLogoIncludesName(e.target.checked)}
+                  className="w-4 h-4 accent-accent mt-0.5"
+                />
+                <div>
+                  <p className="text-sm font-medium leading-tight">My logo already includes my business name</p>
+                  <p className="text-xs text-muted-foreground leading-tight mt-0.5">
+                    {logoIncludesName
+                      ? "We'll render the logo only — no separate name on the sign."
+                      : "We'll render your name next to the logo. Check this if your logo art already spells it out."}
+                  </p>
+                </div>
+              </label>
+            )}
+
             {/* ── MAIN: What kind of sign? ── */}
             <div>
               <label className="block text-sm font-medium mb-2">What kind of sign? *</label>
@@ -888,6 +927,17 @@ export default function NewOrderPage() {
             {/* ── LETTERS ── */}
             {signCategory === "letters" && (
               <>
+                {/* Fabrication feasibility hint — logo may be too complex to cut as channel letters */}
+                {logoDataUrl && logoAnalysis && !logoAnalysis.letters_feasible && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                    <p className="font-medium leading-tight">Your logo may be too detailed for channel letters</p>
+                    <p className="text-xs leading-snug mt-1">
+                      It looks like it has {logoAnalysis.distinct_colors}+ colors or fine detail, which can&apos;t be cut from flat acrylic.
+                      Consider switching to <span className="font-medium">Light Box</span> — it prints your logo exactly as-is.
+                    </p>
+                  </div>
+                )}
+
                 {/* Background toggle */}
                 <div>
                   <label className="block text-sm font-medium mb-2">Background panel</label>
