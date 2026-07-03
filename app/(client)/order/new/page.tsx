@@ -21,6 +21,7 @@ import {
   type FontStyle,
 } from "@/lib/sign-references"
 import PictureChoice from "@/components/order/PictureChoice"
+import { buildSignPrompt, type SignPromptParams } from "@/lib/sign-prompt"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
 
@@ -258,6 +259,8 @@ export default function NewOrderPage() {
   const [primaryColor, setPrimaryColor] = useState("#1C1C1C") // letter color
   const [secondaryColor, setSecondaryColor] = useState("")
   const [notes, setNotes] = useState("")
+  // Free-form instructions appended to the AI preview prompt (advanced).
+  const [customPrompt, setCustomPrompt] = useState("")
   // Job requirements (asked on the review step, before the job goes out for quotes)
   const [needsInstallation, setNeedsInstallation] = useState<boolean | null>(null)
   const [coiRequired, setCoiRequired] = useState<"yes" | "no" | "unsure" | null>(null)
@@ -425,6 +428,34 @@ export default function NewOrderPage() {
   // Active background color (depends on the chosen panel material).
   const bgColor = bgMaterial === "acrylic" ? bgAcrylicColor : panelBgColor
 
+  // The exact prompt we hand to the AI — assembled by the SAME builder the server
+  // uses, so what the client previews here is what actually gets sent.
+  const promptParams: SignPromptParams = {
+    businessName,
+    brandMode,
+    hasLogo: !!logoDataUrl,
+    referenceId,
+    lightingType,
+    fontStyle,
+    letterColor: primaryColor,
+    panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
+    panelBg: isChannelLetter && hasBackground
+      ? (bgMaterial === "acrylic"
+          ? { name: bgColor.name, code: bgColor.code, hex: bgColor.hex, finish: bgAcrylicColor.finish }
+          : { name: bgColor.name, code: bgColor.code, hex: bgColor.hex })
+      : null,
+    hasBackground: isChannelLetter ? hasBackground : undefined,
+    bgMaterial: isChannelLetter && hasBackground ? bgMaterial : undefined,
+    acrylic: colorSystem === "acrylic" ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
+    awningFrame: isAwning ? awningFrame : undefined,
+    fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
+    awningIllumination: isAwning ? awningIllumination : undefined,
+    isCorner,
+    foldXPct: isCorner && quad && quad.length === 6 ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined,
+    customPrompt: customPrompt.trim() || undefined,
+  }
+  const assembledPrompt = buildSignPrompt(promptParams)
+
   async function runEstimate(q: QuadPoint[]) {
     if (!photoDataUrl) return
     setEstimating(true)
@@ -482,24 +513,12 @@ export default function NewOrderPage() {
     setSelectedPreviewIdx(0)
     setPreviewSkipped(false)
 
+    // Reuse the exact same params that build the on-screen prompt preview, so what
+    // the client sees is byte-for-byte what the server sends to the AI.
     const payload = {
       imageDataUrl: photoDataUrl, quad,
       logoDataUrl: logoDataUrl ?? undefined,
-      // reference-style + brand params (shared with the prompt preview)
-      referenceId, lightingType, businessName, brandMode,
-      fontStyle, letterColor: primaryColor,
-      panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : undefined,
-      panelBg:   isChannelLetter && hasBackground
-        ? (bgMaterial === "acrylic"
-            ? { name: bgColor.name, code: bgColor.code, hex: bgColor.hex, finish: bgAcrylicColor.finish }
-            : { name: bgColor.name, code: bgColor.code, hex: bgColor.hex })
-        : undefined,
-      hasBackground: isChannelLetter ? hasBackground : undefined,
-      bgMaterial: isChannelLetter && hasBackground ? bgMaterial : undefined,
-      acrylic:   colorSystem === "acrylic"  ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : undefined,
-      awningFrame: isAwning ? awningFrame : undefined,
-      fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
-      awningIllumination: isAwning ? awningIllumination : undefined,
+      ...promptParams,
       count: 3,
     }
 
@@ -1332,6 +1351,47 @@ export default function NewOrderPage() {
                 className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none"
               />
             </div>
+
+            {/* Advanced AI settings — extra instructions fed straight to the preview generator */}
+            <details className="border border-border rounded-xl overflow-hidden group">
+              <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+                <span>Advanced AI settings</span>
+                <span className="text-xs text-muted-foreground group-open:hidden">show</span>
+                <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+              </summary>
+              <div className="px-4 pb-4 space-y-2">
+                <label className="block text-sm font-medium">Extra instructions for the AI preview</label>
+                <p className="text-xs text-muted-foreground">
+                  Added directly to the AI prompt. Use it to steer the render — e.g. keep the logo untouched, a mounting detail, or a background note.
+                </p>
+                <textarea
+                  value={customPrompt}
+                  onChange={e => setCustomPrompt(e.target.value)}
+                  rows={3}
+                  placeholder="e.g. Keep the logo exactly as uploaded — do not redraw or recolor it."
+                  className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent resize-none"
+                />
+
+                <div className="pt-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-muted-foreground">Full prompt sent to the AI</label>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(assembledPrompt)}
+                      className="text-xs text-accent font-medium hover:underline"
+                    >
+                      Copy
+                    </button>
+                  </div>
+                  <pre className="max-h-56 overflow-auto rounded-lg border border-border bg-muted/40 px-3 py-2 text-[11px] leading-relaxed text-muted-foreground whitespace-pre-wrap font-mono">
+                    {assembledPrompt}
+                  </pre>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    Live preview — updates as you change options above. Your extra instructions are appended at the end.
+                  </p>
+                </div>
+              </div>
+            </details>
           </div>
 
           <div className="flex gap-3">

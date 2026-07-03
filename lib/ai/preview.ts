@@ -96,6 +96,8 @@ export interface PreviewJobParams {
   bgMaterial?: "aluminum" | "acrylic"
   acrylic?: PromptColor | null
   count?: number
+  // Free-form client instructions appended to the generated prompt.
+  customPrompt?: string
   // Storage paths (background path) — input image + optional logo live in the bucket.
   photoPath?: string
   logoPath?: string
@@ -270,6 +272,7 @@ export async function generatePreviewDataUrls(
     awningIllumination: params.awningIllumination,
     isCorner,
     foldXPct,
+    customPrompt: params.customPrompt,
   })
 
   const genCount = Math.min(Math.max(1, params.count ?? 3), 3)
@@ -344,12 +347,12 @@ export async function runPreviewJob(jobId: string): Promise<void> {
     for (let i = 0; i < dataUrls.length; i++) {
       const buf = Buffer.from(dataUrls[i]!.split(",")[1]!, "base64")
       const path = `previews/${job.user_id}/${jobId}-${i}.jpg`
-      const { error: upErr } = await supabase.storage.from("documents").upload(path, buf, {
+      const { error: upErr } = await supabase.storage.from("public-assets").upload(path, buf, {
         contentType: "image/jpeg",
         upsert: true,
       })
       if (upErr) throw new Error(`Failed to upload preview ${i}: ${upErr.message}`)
-      urls.push(supabase.storage.from("documents").getPublicUrl(path).data.publicUrl)
+      urls.push(supabase.storage.from("public-assets").getPublicUrl(path).data.publicUrl)
     }
 
     await supabase.from("preview_jobs").update({

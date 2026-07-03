@@ -20,13 +20,13 @@ export async function createOrder(params: {
   const photoPath = `storefronts/${user.id}/${Date.now()}.jpg`
 
   const { error: photoUploadErr } = await supabase.storage
-    .from("documents")
+    .from("public-assets")
     .upload(photoPath, photoBuffer, { contentType: "image/jpeg", upsert: false })
 
   if (photoUploadErr) return { error: photoUploadErr.message }
 
   const { data: { publicUrl: storefrontUrl } } = supabase.storage
-    .from("documents")
+    .from("public-assets")
     .getPublicUrl(photoPath)
 
   // Upload logo if present
@@ -37,10 +37,10 @@ export async function createOrder(params: {
     const ext = params.logoDataUrl.includes("image/png") ? "png" : "jpg"
     const logoPath = `logos/${user.id}/${Date.now()}.${ext}`
     const { error: logoErr } = await supabase.storage
-      .from("documents")
+      .from("public-assets")
       .upload(logoPath, logoBuffer, { contentType: ext === "png" ? "image/png" : "image/jpeg", upsert: false })
     if (!logoErr) {
-      logoUrl = supabase.storage.from("documents").getPublicUrl(logoPath).data.publicUrl
+      logoUrl = supabase.storage.from("public-assets").getPublicUrl(logoPath).data.publicUrl
     }
   }
 
@@ -56,11 +56,11 @@ export async function createOrder(params: {
     const previewPath = `previews/${user.id}/${Date.now()}.jpg`
 
     const { error: previewErr } = await supabase.storage
-      .from("documents")
+      .from("public-assets")
       .upload(previewPath, previewBuffer, { contentType: "image/jpeg", upsert: false })
 
     if (!previewErr) {
-      previewUrl = supabase.storage.from("documents").getPublicUrl(previewPath).data.publicUrl
+      previewUrl = supabase.storage.from("public-assets").getPublicUrl(previewPath).data.publicUrl
     }
   }
 

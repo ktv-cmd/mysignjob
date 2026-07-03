@@ -69,6 +69,7 @@ export async function POST(req: NextRequest) {
       bgMaterial: body.bgMaterial,
       acrylic: body.acrylic ?? null,
       count: body.count ?? 3,
+      customPrompt: body.customPrompt,
       photoPath,
       logoPath,
     }

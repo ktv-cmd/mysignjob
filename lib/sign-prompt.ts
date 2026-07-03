@@ -35,6 +35,8 @@ export interface SignPromptParams {
   // ── corner ──
   isCorner?: boolean
   foldXPct?: number
+  // ── free-form client instructions appended to the generated prompt ──
+  customPrompt?: string
 }
 
 // ─── Lighting description (channel letters) ───────────────────────────────────
@@ -147,7 +149,22 @@ function awningColorClause(p: SignPromptParams): string {
   ].join(" ")
 }
 
+// Extra emphasis when a logo is supplied. The generative model tends to re-draw
+// the logo instead of preserving it, so we hammer on exact reproduction.
+function logoFidelityClause(p: SignPromptParams): string {
+  if (!p.hasLogo) return ""
+  return "LOGO FIDELITY (critical): reproduce the supplied logo from Image 2 EXACTLY as provided — identical shapes, proportions, letterforms, spacing, and colors. Do NOT redraw, restyle, simplify, re-letter, translate, add, remove, or reinterpret any part of the logo. Treat it as a fixed brand asset placed onto the sign, unchanged."
+}
+
 export function buildSignPrompt(p: SignPromptParams): string {
+  const base = buildBasePrompt(p)
+  const custom = p.customPrompt?.trim()
+    ? `ADDITIONAL CLIENT INSTRUCTIONS (high priority, override defaults where they conflict): ${p.customPrompt.trim()}`
+    : ""
+  return [base, logoFidelityClause(p), custom].filter(Boolean).join(" ")
+}
+
+function buildBasePrompt(p: SignPromptParams): string {
   const cornerClause = p.isCorner && p.foldXPct != null
     ? ` This is a WRAPAROUND CORNER SIGN that bends around the building's vertical corner edge at approximately ${p.foldXPct.toFixed(0)}% across the golden zone. The front face covers the left portion and the side face (angled away) covers the right portion, with the business name readable on both faces.`
     : ""
