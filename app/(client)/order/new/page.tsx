@@ -973,27 +973,26 @@ export default function NewOrderPage() {
                   </div>
                 )}
 
-                {/* Background toggle */}
+                {/* Background panel choice */}
                 <div>
                   <label className="block text-sm font-medium mb-2">Background panel</label>
-                  <label className="flex items-start gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-                    <input type="checkbox" checked={hasBackground} onChange={e => setHasBackground(e.target.checked)} className="w-4 h-4 accent-accent mt-0.5" />
-                    <div className="flex-1">
-                      <p className="text-sm font-medium leading-tight">{hasBackground ? "With background panel" : "Letters only (no background)"}</p>
-                      <p className="text-xs text-muted-foreground leading-tight mt-0.5">{hasBackground ? "Letters on a finished backer panel" : "Letters mounted directly on the wall"}</p>
-                      <div className="mt-2 w-32 rounded-lg overflow-hidden bg-muted aspect-square relative">
-                        <img
-                          src={hasBackground ? "/examples/background/with-panel.jpg" : "/examples/background/letters-only.jpg"}
-                          alt={hasBackground ? "Letters with background panel" : "Letters only, no background"}
-                          className="w-full h-full object-cover"
-                          onError={e => { const img = e.currentTarget; img.style.display = "none"; const ph = img.nextElementSibling as HTMLElement | null; if (ph) ph.style.display = "flex" }}
-                        />
-                        <div className="hidden absolute inset-0 items-center justify-center bg-muted" aria-hidden="true">
-                          <span className="text-3xl text-muted-foreground/25">📷</span>
-                        </div>
-                      </div>
-                    </div>
-                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <PictureChoice
+                      imageSrc="/examples/background/with-panel.jpg"
+                      label="With background"
+                      description="Letters on a finished backer panel"
+                      selected={hasBackground}
+                      onClick={() => setHasBackground(true)}
+                      recommended
+                    />
+                    <PictureChoice
+                      imageSrc="/examples/background/letters-only.jpg"
+                      label="Letters only"
+                      description="Letters mounted directly on the wall"
+                      selected={!hasBackground}
+                      onClick={() => setHasBackground(false)}
+                    />
+                  </div>
                 </div>
 
                 {/* Background colors (right after toggle, when has_background) */}
