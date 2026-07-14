@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { createServiceRoleClient } from "@/lib/supabase/service"
 import { redirect } from "next/navigation"
 
 export type AuthState = { error: string } | null
@@ -25,7 +26,7 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
 
   if (profile?.role === "admin") redirect("/admin")
   if (profile?.role === "sc") redirect("/sc/dashboard")
-  if (next && next.startsWith("/")) redirect(next)
+  if (next && next.startsWith("/") && !next.startsWith("//") && !next.startsWith("/\\")) redirect(next)
   redirect("/dashboard")
 }
 
@@ -57,15 +58,18 @@ export async function signUpSC(_prev: AuthState, formData: FormData): Promise<Au
   if (!companyName) return { error: "Company name is required." }
 
   const supabase = await createClient()
-  const { error } = await supabase.auth.signUp({
+  const { data: signUpData, error } = await supabase.auth.signUp({
     email,
     password,
     options: { data: { role: "sc", full_name: fullName } },
   })
   if (error) return { error: error.message }
 
-  const { data: { user } } = await supabase.auth.getUser()
+  const user = signUpData?.user
   if (user) {
+    // DB trigger hardcodes role='client'; override server-side with service role
+    const serviceClient = createServiceRoleClient()
+    await serviceClient.from("users").update({ role: "sc" }).eq("id", user.id)
     await supabase.from("sc_companies").insert({ user_id: user.id, name: companyName })
   }
 

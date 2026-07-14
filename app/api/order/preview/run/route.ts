@@ -7,6 +7,12 @@ export const maxDuration = 300
 // `next dev` (whose long-lived process can finish the work). On Netlify the
 // background function is used instead — this route is not invoked there.
 export async function POST(req: NextRequest) {
+  // Verify shared secret so external callers cannot trigger arbitrary job runs.
+  const workerSecret = process.env.PREVIEW_WORKER_SECRET
+  if (!workerSecret || req.headers.get("x-worker-secret") !== workerSecret) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 })
+  }
+
   try {
     const { jobId } = await req.json() as { jobId?: string }
     if (!jobId) return NextResponse.json({ error: "jobId required" }, { status: 400 })

@@ -4,19 +4,19 @@ import Link from "next/link"
 import type { Order } from "@/types"
 
 const STATUS_LABELS: Record<string, { label: string; description: string; step: number }> = {
-  submitted:             { label: "Submitted",             description: "Your order is in our queue. We're broadcasting it to sign companies in your area.", step: 1 },
-  bidding:               { label: "Collecting Bids",       description: "Sign companies are reviewing your project and preparing quotes (up to 24 hrs).", step: 2 },
-  quote_ready:           { label: "Quote Ready",           description: "We've selected the best quote for you. Review and accept to move forward.", step: 3 },
-  accepted:              { label: "Accepted",              description: "You've accepted the quote. Please pay the 50% deposit to get started.", step: 4 },
-  deposit_paid:          { label: "Deposit Paid",          description: "Your sign company has been assigned and work is beginning.", step: 5 },
-  in_progress:           { label: "In Progress",           description: "Your sign company is actively working on your project.", step: 6 },
-  submitted_for_review:  { label: "Ready for Review",      description: "Your sign company has submitted install photos. Please approve or request revisions.", step: 7 },
-  revision_requested:    { label: "Revision Requested",    description: "Your revision request has been sent. The sign company is making updates.", step: 7 },
-  approved:              { label: "Approved",              description: "Installation approved! Final payment is due to complete the job.", step: 8 },
-  completed:             { label: "Completed",             description: "Your sign project is complete. Thank you for using My Sign Job!", step: 9 },
+  submitted:             { label: "Submitted",             description: "Your order is in the queue. We're sending it to sign companies in your area.", step: 1 },
+  bidding:               { label: "Collecting quotes",     description: "Sign companies are reviewing your project and preparing quotes — this takes up to 24 hours.", step: 2 },
+  quote_ready:           { label: "Quote ready",           description: "A quote is ready for you. Review it and accept to move forward.", step: 3 },
+  accepted:              { label: "Accepted",              description: "You've accepted the quote. Pay the 50% deposit to get started.", step: 4 },
+  deposit_paid:          { label: "Deposit paid",          description: "Your sign company has been assigned and work is starting.", step: 5 },
+  in_progress:           { label: "In progress",           description: "Your sign company is working on your project.", step: 6 },
+  submitted_for_review:  { label: "Ready for review",      description: "Your sign company has submitted installation photos. Please approve them or request changes.", step: 7 },
+  revision_requested:    { label: "Revision requested",    description: "Your revision request has been sent. The sign company is making the changes.", step: 7 },
+  approved:              { label: "Approved",              description: "Installation approved. Final payment is due to close out the job.", step: 8 },
+  completed:             { label: "Completed",             description: "Your sign is done. Thanks for using My Sign Job.", step: 9 },
   cancelled:             { label: "Cancelled",             description: "This order has been cancelled.", step: 0 },
-  disputed:              { label: "Disputed",              description: "This order is under review. Our team will contact you shortly.", step: 0 },
-  draft:                 { label: "Draft",                 description: "This order is a draft and has not been submitted.", step: 0 },
+  disputed:              { label: "Disputed",              description: "This order is under review. Our team will be in touch shortly.", step: 0 },
+  draft:                 { label: "Draft",                 description: "This order is a draft and hasn't been submitted yet.", step: 0 },
 }
 
 const SIGN_TYPE_LABELS: Record<string, string> = {
@@ -71,8 +71,8 @@ export default async function OrderPage({
     <div className="max-w-2xl mx-auto space-y-6">
       {submitted && (
         <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-green-800">
-          <p className="font-semibold">Order submitted successfully!</p>
-          <p className="text-sm mt-1">We'll notify you by email as quotes come in.</p>
+          <p className="font-semibold">Order submitted.</p>
+          <p className="text-sm mt-1">We'll email you as quotes come in.</p>
         </div>
       )}
 
@@ -147,15 +147,6 @@ export default async function OrderPage({
           )}
           {spec.sign_type !== "awning" && spec.material && <Row label="Material" value={spec.material} />}
           <Row label="Illumination" value={ILLUMINATION_LABELS[spec.illumination] ?? spec.illumination} />
-          {spec.is_corner && spec.front_width_inches && spec.side_width_inches ? (
-            <>
-              <Row label="Front Face" value={`${spec.front_width_inches}″ W × ${spec.height_inches}″ H`} />
-              <Row label="Side Face" value={`${spec.side_width_inches}″ W × ${spec.height_inches}″ H`} />
-              <Row label="Total Developed" value={`${spec.width_inches}″ developed × ${spec.height_inches}″ H`} />
-            </>
-          ) : (spec.width_inches || spec.height_inches) ? (
-            <Row label="Estimated Size" value={`${spec.width_inches ?? "?"}″ W × ${spec.height_inches ?? "?"}″ H`} />
-          ) : null}
         </dl>
         {spec.custom_notes && (
           <div>

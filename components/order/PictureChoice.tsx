@@ -1,8 +1,11 @@
 "use client"
 
+import { useState } from "react"
+
 interface PictureChoiceProps {
   imageSrc: string
   imageAlt?: string
+  nightImageSrc?: string
   label: string
   description?: string
   badge?: string
@@ -11,11 +14,15 @@ interface PictureChoiceProps {
   onClick: () => void
   recommended?: boolean
   compact?: boolean
+  /** Show the night photo first instead of the day photo — use when the night
+   *  view is what actually differentiates this choice (e.g. lighting style). */
+  defaultNight?: boolean
 }
 
 export default function PictureChoice({
   imageSrc,
   imageAlt,
+  nightImageSrc,
   label,
   description,
   badge,
@@ -24,7 +31,13 @@ export default function PictureChoice({
   onClick,
   recommended,
   compact,
+  defaultNight,
 }: PictureChoiceProps) {
+  const [showNight, setShowNight] = useState(!!defaultNight)
+  const activeSrc = nightImageSrc ? (showNight ? nightImageSrc : imageSrc) : imageSrc
+  const [failedSrcs, setFailedSrcs] = useState<Set<string>>(new Set())
+  const hasError = failedSrcs.has(activeSrc)
+
   return (
     <button
       type="button"
@@ -35,22 +48,35 @@ export default function PictureChoice({
       <div className={`bg-muted overflow-hidden relative aspect-square`}>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={imageSrc}
+          src={activeSrc}
           alt={imageAlt ?? label}
           className="w-full h-full object-cover"
-          onError={e => {
-            const img = e.currentTarget as HTMLImageElement
-            img.style.display = "none"
-            const ph = img.nextElementSibling as HTMLElement | null
-            if (ph) ph.style.display = "flex"
+          style={{ display: hasError ? "none" : undefined }}
+          onError={() => {
+            // Track by the same relative path used for lookup — the DOM's
+            // resolved absolute URL would never match activeSrc.
+            setFailedSrcs(prev => new Set(prev).add(activeSrc))
           }}
         />
         <div
-          className="hidden absolute inset-0 items-center justify-center bg-muted"
+          className={`${hasError ? "flex" : "hidden"} absolute inset-0 items-center justify-center bg-muted`}
           aria-hidden="true"
         >
           <span className="text-3xl text-muted-foreground/25">📷</span>
         </div>
+        {nightImageSrc && (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation()
+              setShowNight(prev => !prev)
+            }}
+            className="absolute top-2 left-2 bg-black/50 hover:bg-black/70 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow"
+            aria-label={showNight ? "Show day photo" : "Show night photo"}
+          >
+            {showNight ? "☀️" : "🌙"}
+          </button>
+        )}
       </div>
 
       <div className="p-2.5">

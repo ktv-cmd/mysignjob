@@ -9,10 +9,10 @@ interface Props {
 }
 
 const TIPS = [
-  { icon: "📐", text: "Stand straight in front — avoid angles over 15°" },
-  { icon: "🚪", text: "Include the entrance door for accurate sizing" },
-  { icon: "☀️", text: "Take in good light — avoid harsh shadows" },
-  { icon: "🏢", text: "Capture the full facade width" },
+  { icon: "📐", text: "Stand straight in front — tilting the camera more than 15° makes sizing less accurate" },
+  { icon: "🚪", text: "Include the entrance door — we use it to calculate your sign's size" },
+  { icon: "☀️", text: "Shoot in good light and avoid harsh shadows" },
+  { icon: "🏢", text: "Show the full width of your storefront" },
 ]
 
 export default function PhotoUpload({ onPhoto }: Props) {
@@ -38,9 +38,14 @@ export default function PhotoUpload({ onPhoto }: Props) {
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
+    onDropRejected: () => setError("That file isn't supported. Try a JPG, PNG, WEBP, or HEIC photo under 30MB."),
     accept: { "image/*": [".jpg", ".jpeg", ".png", ".webp", ".heic"] },
     maxFiles: 1,
     maxSize: 30 * 1024 * 1024,
+    // Chrome's File System Access picker (showOpenFilePicker) converts the picked
+    // handle to a File asynchronously; when that stalls, the dialog closes with no
+    // error and no file ever reaches onDrop. Force the plain <input> fallback instead.
+    useFsAccessApi: false,
   })
 
   if (preview) {
@@ -72,16 +77,16 @@ export default function PhotoUpload({ onPhoto }: Props) {
         {loading ? (
           <div className="space-y-2">
             <div className="text-3xl animate-pulse">🖼️</div>
-            <p className="text-sm text-muted-foreground">Processing image…</p>
+            <p className="text-sm text-muted-foreground">Processing your photo…</p>
           </div>
         ) : (
           <div className="space-y-3">
             <div className="text-4xl">📷</div>
             <p className="font-medium">
-              {isDragActive ? "Drop your photo here" : "Upload a storefront photo"}
+              {isDragActive ? "Drop your photo here" : "Upload a photo of your storefront"}
             </p>
             <p className="text-sm text-muted-foreground">
-              Drag & drop or click to browse — JPG, PNG, WEBP, HEIC
+              Drag and drop, or tap to choose — JPG, PNG, WEBP, HEIC
             </p>
           </div>
         )}

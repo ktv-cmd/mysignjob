@@ -6,7 +6,7 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["/Users/kaykovmedia/start-mysignjob.sh"],
       "port": 3000,
-      "autoPort": false
+      "autoPort": true
     }
   ]
 }

@@ -4,6 +4,20 @@ import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 import type { SignSpec } from "@/types"
 
+const MAX_IMAGE_BYTES = 10 * 1024 * 1024 // 10 MB decoded
+const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp"]
+
+function validateDataUrl(dataUrl: string, label: string): string | null {
+  const match = dataUrl.match(/^data:(image\/[a-zA-Z+]+);base64,/)
+  if (!match) return `${label}: invalid data URL format.`
+  const mimeType = match[1].toLowerCase()
+  if (!ALLOWED_IMAGE_TYPES.includes(mimeType)) return `${label}: unsupported image type "${mimeType}". Only JPEG, PNG, and WebP are allowed.`
+  const base64 = dataUrl.split(",")[1]
+  const decodedSize = Math.floor((base64.length * 3) / 4)
+  if (decodedSize > MAX_IMAGE_BYTES) return `${label}: image exceeds the 10 MB limit.`
+  return null
+}
+
 export async function createOrder(params: {
   photoDataUrl: string
   previewDataUrl: string | null
@@ -13,6 +27,39 @@ export async function createOrder(params: {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
   if (!user) redirect("/login?next=/order/new")
+
+  // Validate data URLs before processing
+  const photoErr = validateDataUrl(params.photoDataUrl, "Photo")
+  if (photoErr) return { error: photoErr }
+
+  if (params.logoDataUrl) {
+    const logoErr = validateDataUrl(params.logoDataUrl, "Logo")
+    if (logoErr) return { error: logoErr }
+  }
+
+  // Validate previewDataUrl — accept only an https URL on the Supabase storage
+  // domain, a relative path, or a data URL (legacy sync path). Reject any other
+  // external https URL to prevent storing arbitrary third-party URLs.
+  if (params.previewDataUrl) {
+    const preview = params.previewDataUrl
+    if (preview.startsWith("http")) {
+      const supabaseHost = new URL(process.env.NEXT_PUBLIC_SUPABASE_URL!).hostname
+      let previewHost: string
+      try {
+        previewHost = new URL(preview).hostname
+      } catch {
+        return { error: "Preview URL is not a valid URL." }
+      }
+      if (!preview.startsWith("https://") || previewHost !== supabaseHost) {
+        return { error: "Preview URL must be hosted on the Supabase storage domain." }
+      }
+    } else if (!preview.startsWith("/") && !preview.startsWith("data:")) {
+      return { error: "Preview URL is not a valid path or data URL." }
+    } else if (preview.startsWith("data:")) {
+      const previewErr = validateDataUrl(preview, "Preview")
+      if (previewErr) return { error: previewErr }
+    }
+  }
 
   // Upload storefront photo to Supabase Storage
   const photoBase64 = params.photoDataUrl.split(",")[1]

@@ -24,6 +24,16 @@ export async function POST(req: NextRequest) {
   const file = formData.get("file") as File | null
   if (!file) return NextResponse.json({ error: "No file uploaded." }, { status: 400 })
 
+  // Validate MIME type and size before touching storage or sending to AI.
+  const ALLOWED_INSURANCE_MIME = ["application/pdf", "image/jpeg", "image/png"]
+  const INSURANCE_MAX_BYTES = 20 * 1024 * 1024  // 20 MB
+  if (!ALLOWED_INSURANCE_MIME.includes(file.type)) {
+    return NextResponse.json({ error: "File must be a PDF, JPEG, or PNG." }, { status: 400 })
+  }
+  if (file.size > INSURANCE_MAX_BYTES) {
+    return NextResponse.json({ error: "File exceeds the 20 MB size limit." }, { status: 400 })
+  }
+
   const { data: sc } = await supabase
     .from("sc_companies")
     .select("id, name, city, state")
@@ -43,7 +53,12 @@ export async function POST(req: NextRequest) {
 
   if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 })
 
-  const { data: { publicUrl } } = supabase.storage.from("documents").getPublicUrl(path)
+  // The 'documents' bucket is private — generate a short-lived signed URL for
+  // internal reference only. We store the storage path, not a public URL.
+  const { data: signedData } = await supabase.storage
+    .from("documents")
+    .createSignedUrl(path, 60 * 60)  // 1-hour expiry, for internal/display use only
+  const insuranceDocPath = path  // store path; derive signed URL on demand
 
   // ── Gemini Vision OCR ──────────────────────────────────────────────────────
   const apiKey = process.env.GEMINI_API_KEY
@@ -156,11 +171,11 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
 
   const verified = issues.length === 0 && extracted.confidence >= 0.6
 
-  // Save results
+  // Save results — store the storage path (not a public URL; bucket is private).
   await supabase
     .from("sc_companies")
     .update({
-      insurance_doc_url: publicUrl,
+      insurance_doc_url: insuranceDocPath,
       insurance_extracted: { ...extracted, issues, jurisdiction_label: reqRow?.label ?? "Default" },
       insurance_gl_cents: extracted.gl_per_occurrence_cents,
       insurance_expires_at: extracted.expires_at ? new Date(extracted.expires_at).toISOString() : null,
@@ -170,7 +185,10 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
     })
     .eq("user_id", user.id)
 
-  // Trigger auto status-flip if verified
+  // Trigger status transition if all prerequisites are met.
+  // We set 'pending_review' rather than 'active' because the AI OCR result has
+  // not been human-verified; a staff reviewer should confirm before the SC can
+  // accept jobs. Skipping straight to 'active' from machine output is unsafe.
   if (verified) {
     const { data: updatedSC } = await supabase
       .from("sc_companies")
@@ -179,7 +197,7 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
       .single()
 
     if (updatedSC?.agreement_signed_at && updatedSC.stripe_onboarding_complete) {
-      await supabase.from("sc_companies").update({ status: "active" }).eq("user_id", user.id)
+      await supabase.from("sc_companies").update({ status: "pending_review" }).eq("user_id", user.id)
     }
   }
 

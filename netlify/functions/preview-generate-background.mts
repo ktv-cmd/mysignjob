@@ -8,6 +8,12 @@
 import { runPreviewJob } from "../../lib/ai/preview"
 
 export default async (req: Request): Promise<Response> => {
+  // Verify shared secret so external callers cannot trigger arbitrary job runs.
+  const workerSecret = process.env.PREVIEW_WORKER_SECRET
+  if (!workerSecret || req.headers.get("x-worker-secret") !== workerSecret) {
+    return new Response("Forbidden", { status: 403 })
+  }
+
   try {
     const { jobId } = (await req.json()) as { jobId?: string }
     if (!jobId) return new Response("jobId required", { status: 400 })

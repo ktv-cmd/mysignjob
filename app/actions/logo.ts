@@ -1,5 +1,6 @@
 "use server"
 
+import { createClient } from "@/lib/supabase/server"
 import type { LogoAnalysis } from "@/types"
 
 // Channel letters are cut from flat, single-color acrylic/aluminum faces — one
@@ -7,7 +8,11 @@ import type { LogoAnalysis } from "@/types"
 // can't be cut, so those logos need a printed/backlit Light Box face instead.
 const MAX_COLORS_FOR_LETTERS = 3
 
-export async function analyzeLogoComplexity(logoDataUrl: string): Promise<LogoAnalysis> {
+export async function analyzeLogoComplexity(logoDataUrl: string): Promise<LogoAnalysis | { error: string }> {
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Not authenticated." }
+
   // @ts-ignore — sharp's types resolve oddly under package.json exports
   const sharp = (await import("sharp")).default
   const base64 = logoDataUrl.split(",")[1]

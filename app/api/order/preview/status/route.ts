@@ -13,11 +13,14 @@ export async function GET(req: NextRequest) {
 
   const { data: job, error } = await supabase
     .from("preview_jobs")
-    .select("status, result_urls, error")
+    .select("status, result_urls, error, user_id")
     .eq("id", jobId)
     .single()
 
   if (error || !job) return NextResponse.json({ error: "Job not found" }, { status: 404 })
+
+  // IDOR guard: only the owning user may read this job.
+  if (job.user_id !== user.id) return NextResponse.json({ error: "Job not found" }, { status: 404 })
 
   return NextResponse.json({
     status: job.status,

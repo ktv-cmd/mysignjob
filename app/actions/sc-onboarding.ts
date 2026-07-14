@@ -45,6 +45,8 @@ export async function saveBusinessInfo(
   if (ein.length !== 9) return { error: "EIN must be 9 digits (e.g. 12-3456789)." }
   if (!address_line1 || !city || !state || !zip)
     return { error: "Please fill in all address fields." }
+  if (isNaN(service_radius_miles) || service_radius_miles < 1 || service_radius_miles > 500)
+    return { error: "Service radius must be between 1 and 500 miles." }
 
   // Geocode the address via a free/simple approach using the US Census geocoder
   let lat: number | null = null
@@ -151,6 +153,13 @@ export async function checkAndActivateSC(): Promise<{ status: string; missing: s
   if (!sc.agreement_signed_at) missing.push("agreement")
 
   if (!sc.insurance_verified) missing.push("insurance")
+
+  // insurance_verified only means the AI-extracted certificate passed rule
+  // checks — an admin still has to confirm the extraction before the SC can
+  // go live. Without this gate, this function would flip status straight to
+  // 'active' the moment insurance_verified flips true, silently overriding
+  // the 'pending_review' state that verify-insurance/route.ts just set.
+  if (sc.insurance_verified && !sc.insurance_reviewed_at) missing.push("admin_review")
 
   // Check Stripe payouts_enabled
   let payoutsEnabled = sc.stripe_onboarding_complete

@@ -92,11 +92,16 @@ export interface SignSpec {
   material: SignMaterial
   illumination: IlluminationType
   custom_notes: string | null
-  // AI estimation metadata
+  // Size-estimation metadata — populated from the client-side reference-line
+  // geometry calc (lib/sign-geometry.ts), not an AI guess.
   estimation_references: string[] // e.g. ["door", "brick"]
   estimation_angle_warning: boolean
   // Selection quad (normalized 0–1) — 4 points [TL,TR,BR,BL] for flat, 6 points [TL,TM,TR,BR,BM,BL] for corner
   selection_quad: { x: number; y: number }[]
+  // Reference-line calibration ("app ruler") the client marked to compute size
+  reference_type?: string             // e.g. "door" | "window" | "brick" | "custom"
+  reference_inches?: number           // known real-world length of the reference line
+  reference_line?: { x: number; y: number }[]  // 2 normalized points [A,B]
   // Corner / wraparound sign fields
   is_corner?: boolean
   front_width_inches?: number  // face 1 width (corner signs only)

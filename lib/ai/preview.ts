@@ -33,6 +33,9 @@ EXECUTION SEQUENCE:
 5. ZERO GOLD POLICY: Final output = 0% gold/yellow pixels — either covered by the sign OR restored to facade texture.
 6. CORNER GEOMETRY (non-negotiable): The selection brush may have rounded/soft edges — a painting artifact only. The sign's corners and edges are ALWAYS hard 90-degree right angles. Never round sign geometry.
 
+## PRE-INSTALLED PANEL OVERRIDE (supersedes the sequence above):
+If the user prompt states the backer panel is ALREADY PAINTED into Image 1 (a solid-color rectangle): do NOT erase, shrink, rebuild, or resize that rectangle. It IS the sign's backer panel at its final, exact boundaries. Keep the panel's fill color and add realistic material, lighting, visible edge thickness, and contact shadows, then mount the letters on its face. Never draw any gold/yellow outline, border, or frame around the panel — its edges are clean panel edges against the wall. SURFACE RESTORATION applies only OUTSIDE the panel.
+
 ## GEOMETRY ENFORCEMENT (Forces 3D Depth):
 - Use terms: "Extruded," "Volumetric Mesh," "Z-axis protrusion".
 - Exact depth: 3.5 inches (89mm) perpendicular to the wall's surface normal.
@@ -58,7 +61,9 @@ IF ILLUMINATED: Ray-traced PBR — Front-lit: subsurface scattering through acry
 LAYER 1: STRUCTURAL RULES (THE CASES)
 ═══════════════════════════════════════════════════════════════════════════
 
-CASE A (LOGO ONLY): Construct as a 3D CABINET LIGHTBOX MESH — translucent front face + 4 aluminum return walls + back mounting plate, 3.5" Z-extrusion. Extract EXACT colors from the logo. FULL-BLEED FACE: the logo's background color floods 100% of the face edge-to-edge — no raw white acrylic, no margins.
+CASE A1 (LOGO ONLY, WITH BACKER PANEL): Construct as a 3D CABINET LIGHTBOX MESH — translucent front face + 4 aluminum return walls + back mounting plate, 3.5" Z-extrusion. Extract EXACT colors from the logo. FULL-BLEED FACE: the logo's background color floods 100% of the face edge-to-edge — no raw white acrylic, no margins.
+
+CASE A2 (LOGO ONLY, NO BACKER PANEL — user prompt says the wall stays visible): Construct as a FLAT-CUT DIMENSIONAL LOGO. Treat the Image 2 artwork as a fixed 2D stencil/die-cut: extrude that EXACT silhouette perpendicular to the wall (1–2" depth). Do NOT re-layout, re-sculpt, re-letter, or redesign the artwork — only add depth. Every shape, curve, and letterform matches Image 2 precisely, as if the artwork were CNC-cut from a sheet. If the user prompt specifies a sign color, apply that color to the cut faces and returns; otherwise keep the logo's original colors. Mount the pieces directly on the wall — the wall surface remains visible between and around them.
 
 CASE B (NAME ONLY): Construct as EXTRUDED 3D CHANNEL LETTERFORMS — each letter a 6-faced primitive (front face + 4 returns + back), 3.5" depth. If a font style is specified, follow that exact typographic direction. If a HEX is specified, use it exactly.
 
@@ -78,11 +83,40 @@ One ray-traced PBR render (16:9) with the sign physically integrated into the bu
 
 type Part = { text: string } | { inlineData: { mimeType: string; data: string } }
 
+// ─── Input sanitization helpers ───────────────────────────────────────────────
+
+const HEX_COLOR_RE = /^#[0-9a-fA-F]{3,8}$/
+
+/**
+ * Validate a color value before injecting it into SVG markup.
+ * Accepts 3-, 4-, 6-, or 8-digit hex codes only (no named colors, no rgb(...),
+ * no arbitrary strings).  Falls back to `fallback` when invalid so Sharp/librsvg
+ * never receives unsanitized user input.
+ */
+function sanitizeHexColor(value: string | undefined | null, fallback: string): string {
+  if (value && HEX_COLOR_RE.test(value)) return value
+  return fallback
+}
+
+/** Allowlist of MIME types accepted from caller-supplied logo data URLs. */
+const ALLOWED_LOGO_MIMES = new Set(["image/png", "image/jpeg", "image/webp"])
+
+/**
+ * Validate a logo MIME type against the allowlist before passing it to the
+ * Gemini API.  Falls back to "image/png" for anything unrecognised.
+ */
+function sanitizeLogoMime(value: string | undefined | null): string {
+  if (value && ALLOWED_LOGO_MIMES.has(value)) return value
+  return "image/png"
+}
+
 // The full set of generation inputs — stored in a preview_jobs row's `params`.
 export interface PreviewJobParams {
   quad: { x: number; y: number }[]
   referenceId: string
   lightingType?: "front" | "back" | "both"
+  illuminated?: boolean
+  seeThroughLetters?: boolean           // light-box variant: halo-lit letters cut from an opaque panel
   businessName: string
   brandMode: BrandMode
   fontStyle?: "modern-sans" | "classic-serif" | "bold-condensed"
@@ -104,6 +138,40 @@ export interface PreviewJobParams {
   // Inline data (synchronous path) — original image + optional logo as data URLs.
   imageDataUrl?: string
   logoDataUrl?: string
+}
+
+// Dev-only diagnostics: dump pipeline images (annotated input, raw model output,
+// final composite) so misalignment/shrink problems can be inspected directly.
+// Disabled in production; writes to PREVIEW_DEBUG_DIR or /tmp.
+async function debugDump(tag: string, buf: Buffer): Promise<void> {
+  const dir = process.env.PREVIEW_DEBUG_DIR
+    ?? (process.env.NODE_ENV !== "production" ? "/tmp/my-sign-job-preview-debug" : null)
+  if (!dir) return
+  try {
+    const fs = await import("fs/promises")
+    await fs.mkdir(dir, { recursive: true })
+    const name = `${new Date().toISOString().replace(/[:.]/g, "-")}-${tag}-${Math.random().toString(36).slice(2, 6)}.jpg`
+    await fs.writeFile(`${dir}/${name}`, buf)
+  } catch {
+    // diagnostics only — never fail a generation over this
+  }
+}
+
+// Gemini image generation only supports these fixed aspect-ratio buckets — it
+// does NOT match the input image's actual ratio. Left unset, it silently picks
+// a default (observed ~2.09:1) that differs from typical storefront photos, and
+// naively stretching the mismatch back to W×H non-uniformly distorts everything
+// (letters bleeding past panel edges, panels not reaching the zone's true edge).
+// Request whichever bucket is closest to the real photo so the gap is minimal.
+const SUPPORTED_ASPECT_RATIOS: [string, number][] = [
+  ["21:9", 21 / 9], ["16:9", 16 / 9], ["3:2", 3 / 2], ["4:3", 4 / 3],
+  ["1:1", 1], ["3:4", 3 / 4], ["2:3", 2 / 3], ["9:16", 9 / 16],
+]
+function nearestAspectRatio(w: number, h: number): string {
+  const target = w / h
+  return SUPPORTED_ASPECT_RATIOS.reduce((best, cur) =>
+    Math.abs(cur[1] - target) < Math.abs(best[1] - target) ? cur : best
+  )[0]
 }
 
 async function generateOne(params: {
@@ -142,6 +210,7 @@ async function generateOne(params: {
         config: {
           responseModalities: ["TEXT", "IMAGE"],
           systemInstruction: SIGN_SYSTEM_INSTRUCTION,
+          imageConfig: { aspectRatio: nearestAspectRatio(W, H) },
           safetySettings: [
             { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
             { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_ONLY_HIGH },
@@ -167,9 +236,25 @@ async function generateOne(params: {
 
       // Composite generated region back over the original using the mask.
       const genBuffer = Buffer.from(generatedBase64, "base64")
+      await debugDump("raw-gen", genBuffer)
       const origRgb = await sharp(originalBuffer).resize(W, H).removeAlpha().raw().toBuffer()
-      const genRgb = await sharp(genBuffer).resize(W, H, { fit: "fill" }).removeAlpha().raw().toBuffer()
-      const blendMask = await sharp(maskBuffer).resize(W, H, { fit: "fill" }).greyscale().raw().toBuffer()
+      // "cover" (crop-to-fill, centered) instead of "fill" (non-uniform stretch).
+      // Even the nearest supported aspect-ratio bucket rarely matches the photo
+      // exactly, so a small centered crop is unavoidable — but a crop preserves
+      // proportions, whereas a stretch warps every shape and misaligns edges.
+      const genRgb = await sharp(genBuffer).resize(W, H, { fit: "cover", position: "centre" }).removeAlpha().raw().toBuffer()
+      // Erode the zone edge a few px (blur + high threshold) so any leftover
+      // gold guide outline the model kept at the mask boundary never survives
+      // into the composite — the rim pixels come from the original photo. A
+      // final 1px blur feathers the seam.
+      const blendMask = await sharp(maskBuffer)
+        .resize(W, H, { fit: "fill" })
+        .greyscale()
+        .blur(2)
+        .threshold(250)
+        .blur(1)
+        .raw()
+        .toBuffer()
 
       const n = W * H
       const out = Buffer.alloc(n * 3)
@@ -184,6 +269,7 @@ async function generateOne(params: {
       const compositedJpeg = await sharp(out, { raw: { width: W, height: H, channels: 3 } })
         .jpeg({ quality: 92 })
         .toBuffer()
+      await debugDump("composite", compositedJpeg)
 
       return `data:image/jpeg;base64,${compositedJpeg.toString("base64")}`
     } catch (err) {
@@ -224,22 +310,45 @@ export async function generatePreviewDataUrls(
   </svg>`
   const maskBuffer = await sharp(Buffer.from(svgMask)).png().toBuffer()
 
-  // Apply gold guide overlay
-  const maskGrey = await sharp(maskBuffer).resize(W, H, { fit: "fill" }).greyscale().raw().toBuffer()
-  const overlay = Buffer.alloc(W * H * 4)
-  for (let i = 0; i < W * H; i++) {
-    if ((maskGrey[i] ?? 0) > 40) {
-      overlay[i * 4] = 255
-      overlay[i * 4 + 1] = 215
-      overlay[i * 4 + 2] = 64
-      overlay[i * 4 + 3] = 140
+  // Annotate the input image for the model.
+  // WITH a backer panel: the model reliably keeps an EXISTING panel's boundaries
+  // but shrinks one it has to invent (it sizes it to the logo artwork instead of
+  // the zone) — so we paint the panel into the photo ourselves as a solid fill
+  // in the panel color. NO gold outline: any gold we paint (or even mention)
+  // tends to survive into the output as a yellow line.
+  // WITHOUT a panel: classic semi-transparent gold zone marking.
+  const isPanelPrepaint =
+    params.hasBackground === true && !!params.panelBg?.hex &&
+    params.referenceId !== "awning" && params.referenceId !== "light-box"
+
+  let annotatedBuffer: Buffer
+  if (isPanelPrepaint) {
+    const safePanelColor = sanitizeHexColor(params.panelBg!.hex, "#808080")
+    const svgPanel = `<svg width="${W}" height="${H}" xmlns="http://www.w3.org/2000/svg">
+      <polygon points="${points}" fill="${safePanelColor}"/>
+    </svg>`
+    annotatedBuffer = await sharp(originalBuffer)
+      .composite([{ input: Buffer.from(svgPanel), blend: "over" }])
+      .jpeg({ quality: 92 })
+      .toBuffer()
+    await debugDump("annotated-input", annotatedBuffer)
+  } else {
+    const maskGrey = await sharp(maskBuffer).resize(W, H, { fit: "fill" }).greyscale().raw().toBuffer()
+    const overlay = Buffer.alloc(W * H * 4)
+    for (let i = 0; i < W * H; i++) {
+      if ((maskGrey[i] ?? 0) > 40) {
+        overlay[i * 4] = 255
+        overlay[i * 4 + 1] = 215
+        overlay[i * 4 + 2] = 64
+        overlay[i * 4 + 3] = 140
+      }
     }
+    const overlayPng = await sharp(overlay, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer()
+    annotatedBuffer = await sharp(originalBuffer)
+      .composite([{ input: overlayPng, blend: "over" }])
+      .jpeg({ quality: 92 })
+      .toBuffer()
   }
-  const overlayPng = await sharp(overlay, { raw: { width: W, height: H, channels: 4 } }).png().toBuffer()
-  const annotatedBuffer = await sharp(originalBuffer)
-    .composite([{ input: overlayPng, blend: "over" }])
-    .jpeg({ quality: 92 })
-    .toBuffer()
 
   // Parse logo if present
   const isCorner = quad.length === 6
@@ -251,15 +360,38 @@ export async function generatePreviewDataUrls(
     const [meta, data] = logoDataUrl.split(",")
     logoBase64 = data ?? null
     const mimeMatch = meta?.match(/data:([^;]+)/)
-    if (mimeMatch?.[1]) logoMime = mimeMatch[1]
+    logoMime = sanitizeLogoMime(mimeMatch?.[1])
+  }
+
+  // Logo color rule:
+  //  • light box (cabinet) or LIT letters → the logo keeps its exact original colors.
+  //  • NO-light letters or see-through letters → the logo takes the client-chosen
+  //    color. We tint the logo file OURSELVES and send the finished artwork as
+  //    Image 2, flattened onto a SOLID WHITE canvas (transparency confused the
+  //    model into rendering no sign at all). The prompt then asks for exact
+  //    reproduction — models copy far more faithfully than they recolor.
+  const chosenHex = params.panelFace?.hex ?? params.acrylic?.hex ?? null
+  const clientColorsLogo = params.referenceId === "no-light-outdoor" || params.seeThroughLetters === true
+  let logoPreColored = false
+  if (logoBase64 && chosenHex && clientColorsLogo) {
+    try {
+      const tinted = await recolorLogoOnWhite(Buffer.from(logoBase64, "base64"), chosenHex, sharp)
+      logoBase64 = tinted.toString("base64")
+      logoMime = "image/png"
+      logoPreColored = true
+    } catch (err) {
+      console.warn("[preview] Logo recolor failed, sending original artwork:", err)
+    }
   }
 
   const prompt = buildSignPrompt({
     businessName: params.businessName,
     brandMode: params.brandMode,
     hasLogo,
+    logoPreColored,
     referenceId: params.referenceId,
     lightingType: params.lightingType,
+    illuminated: params.illuminated,
     fontStyle: params.fontStyle,
     letterColor: params.letterColor,
     panelFace: params.panelFace,
@@ -290,6 +422,50 @@ export async function generatePreviewDataUrls(
     throw firstErr?.reason instanceof Error ? firstErr.reason : new Error("All preview generations failed.")
   }
   return results
+}
+
+// Tint the logo artwork to the chosen sign color and flatten it onto a SOLID
+// WHITE canvas (no alpha channel in the output — transparent PNGs made the
+// model render no sign at all). Near-white pixels count as background and stay
+// white; everything else becomes the chosen color, alpha-blended against white
+// so anti-aliased edges stay smooth.
+async function recolorLogoOnWhite(input: Buffer, hex: string, sharp: typeof import("sharp")): Promise<Buffer> {
+  const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true })
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  const n = info.width * info.height
+  const out = Buffer.alloc(n * 3)
+  for (let i = 0; i < n; i++) {
+    const s = i * 4
+    const o = i * 3
+    const a = (data[s + 3] ?? 0) / 255
+    const isBg = a === 0 || ((data[s] ?? 0) > 240 && (data[s + 1] ?? 0) > 240 && (data[s + 2] ?? 0) > 240)
+    if (isBg) {
+      out[o] = 255; out[o + 1] = 255; out[o + 2] = 255
+    } else {
+      // Blend the tint against white by the source alpha so soft edges survive.
+      out[o]     = Math.round(r * a + 255 * (1 - a))
+      out[o + 1] = Math.round(g * a + 255 * (1 - a))
+      out[o + 2] = Math.round(b * a + 255 * (1 - a))
+    }
+  }
+  const flattened = await sharp(out, { raw: { width: info.width, height: info.height, channels: 3 } }).png().toBuffer()
+
+  // Crop the white canvas tight to the artwork and re-add a small margin.
+  // A large empty canvas gets rendered by the model as a physical white panel
+  // behind the sign; with a tight crop there is barely any canvas to misread.
+  try {
+    const trimmed = await sharp(flattened).trim({ background: "#ffffff", threshold: 12 }).toBuffer()
+    const meta = await sharp(trimmed).metadata()
+    const margin = Math.max(8, Math.round(Math.max(meta.width ?? 0, meta.height ?? 0) * 0.04))
+    return await sharp(trimmed)
+      .extend({ top: margin, bottom: margin, left: margin, right: margin, background: "#ffffff" })
+      .png()
+      .toBuffer()
+  } catch {
+    return flattened
+  }
 }
 
 // ─── Background job worker ────────────────────────────────────────────────────
