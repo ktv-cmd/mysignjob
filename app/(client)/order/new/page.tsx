@@ -1230,11 +1230,12 @@ export default function NewOrderPage() {
                           </>
                         ) : (
                           <>
-                            <PictureChoice key="bg-front" imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_light_night.jpg" defaultNight label="Front" description="Lit face only" selected={lightingStyle === "front"} onClick={() => setLightingStyle("front")} />
                             <PictureChoice key="bg-back" imageSrc="/examples/letters-lighting-bg/Back_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/back_light_night.jpg" defaultNight label="Back" description="Panel glow" selected={lightingStyle === "back"} onClick={() => setLightingStyle("back")} />
+                            <PictureChoice key="bg-front" imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_light_night.jpg" defaultNight label="Front" description="Lit face only" selected={lightingStyle === "front"} onClick={() => setLightingStyle("front")} />
+                            <PictureChoice key="bg-side" imageSrc="/examples/letters-lighting-bg/Side_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/Side_light_night.jpg" defaultNight label="Side" description="Edge glow" selected={lightingStyle === "back_side"} onClick={() => setLightingStyle("back_side")} />
                             <PictureChoice key="bg-front_back" imageSrc="/examples/letters-lighting-bg/Back_Front_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_back_night.jpg" defaultNight label="Front + Back" description="Both directions" selected={lightingStyle === "front_back"} onClick={() => setLightingStyle("front_back")} />
-                            <PictureChoice key="bg-front_side" imageSrc="/examples/letters-lighting-bg/Front_Side_ligth_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_side_night.jpg" defaultNight label="Front + Side" description="Face & side glow" selected={lightingStyle === "front_side"} onClick={() => setLightingStyle("front_side")} />
                             <PictureChoice key="bg-full" imageSrc="/examples/letters-lighting-bg/Full_light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/Full_light_night.jpg" defaultNight label="Full light" description="All-around" selected={lightingStyle === "full"} onClick={() => setLightingStyle("full")} />
+                            <PictureChoice key="bg-front_side" imageSrc="/examples/letters-lighting-bg/Front_Side_ligth_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_side_night.jpg" defaultNight label="Front + Side" description="Face & side glow" selected={lightingStyle === "front_side"} onClick={() => setLightingStyle("front_side")} />
                           </>
                         )}
                       </div>
