@@ -294,11 +294,11 @@ export default function NewOrderPage() {
     if (signCategory === "light_box") return "light-box"
     if (signCategory === "letters" && isLit === false) return "no-light-outdoor"
     if (signCategory === "letters" && isLit === true) {
-      if (lightingStyle === "front") return "front-lit"
+      if (lightingStyle === "front") return "front-lid"
       if (lightingStyle === "back") return "back-lit"
       if (lightingStyle === "front_back" || lightingStyle === "front_side" || lightingStyle === "back_side" || lightingStyle === "full") return "back-front-lid"
     }
-    return "front-lit" // default fallback
+    return "front-lid" // default fallback
   })()
 
   // Auto-switch to aluminum when "No lighting" is selected

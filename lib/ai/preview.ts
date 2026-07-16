@@ -48,7 +48,7 @@ If the user prompt states the backer panel is ALREADY PAINTED into Image 1 (a so
 
 ## LIGHTING & EMISSION:
 IF 'NO LIGHT': PROHIBITED — glow, bloom, halo, neon, luminescence, LED, backlight. REQUIRED — matte surfaces, hard contact shadows (Ambient Occlusion), sun-lit/daylight only, opaque solid materials, zero emission, external environmental lighting only.
-IF ILLUMINATED: Ray-traced PBR — Front-lit: subsurface scattering through acrylic faces + edge glow. Back-lit: ray-traced light wash on wall BEHIND sign with inverse-square falloff, NO face glow. Combined: both effects.
+IF ILLUMINATED: the per-request description below names exactly one lighting technique — treat that name as the complete and only emission spec for this render, not a menu to draw from. Front-lit: ray-traced subsurface scattering through the acrylic faces + edge glow; the wall directly behind the sign stays dark, untouched by any glow. Back-lit: a ray-traced light wash on the wall BEHIND the sign with inverse-square falloff; the letter faces themselves stay opaque and unlit. Both (front-lit + back-lit together): apply both effects exactly as described, each confined to its own surface.
 
 ## COLOR INTEGRITY:
 - LOGO PROVIDED (Image 2): use exact HEX/Pantone from the logo — non-negotiable brand identity.
