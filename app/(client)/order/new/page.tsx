@@ -35,6 +35,19 @@ const STEP_LABELS: Record<Step, string> = {
   review: "Submit",
 }
 
+// Review-page display labels for the channel-letter lighting style — keyed on
+// the same granular lightingStyle state the picker uses, not the collapsed
+// ReferenceStyle.lightingType (which only distinguishes front/back/both and
+// would show "Front + back lit" for Side, Front + Side, and Full alike).
+const LIGHTING_STYLE_LABELS: Record<"front" | "back" | "back_side" | "front_back" | "front_side" | "full", string> = {
+  front: "Front-lit",
+  back: "Back-lit halo",
+  back_side: "Side (back-lit + edge accent)",
+  front_back: "Front + back lit",
+  front_side: "Front-lit + side accent",
+  full: "Full 360° (front, back + side)",
+}
+
 // Reference-object presets for the calibration line — standard inches for
 // common storefront objects, plus a client-typed custom length.
 const REFERENCE_PRESETS: { id: string; label: string; inches: number | null }[] = [
@@ -735,51 +748,12 @@ export default function NewOrderPage() {
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-bold">Mark where your sign will go</h1>
-            <p className="text-muted-foreground mt-1">Drag the corners of the gold box to outline the sign area — this is how we measure your sign's size.</p>
+            <p className="text-muted-foreground mt-1">Drag the corners of the gold box to outline the sign area — or drag anywhere inside it to move the whole box at once. This is how we measure your sign's size.</p>
           </div>
 
-          <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-            <input
-              type="checkbox"
-              checked={knownSize}
-              onChange={e => setKnownSize(e.target.checked)}
-              className="w-4 h-4 accent-accent"
-            />
-            <div>
-              <p className="text-sm font-medium leading-tight">I already know my sign's exact size</p>
-              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Skip measuring from the photo and type the dimensions yourself.</p>
-            </div>
-          </label>
-
-          {/* Mount type question */}
-          <div>
-            <p className="text-sm font-medium mb-0.5">How will the sign mount?</p>
-            <p className="text-xs text-muted-foreground mb-2">Flat signs sit against the wall. Blade signs stick out over the sidewalk so people see them walking along the street.</p>
-            <div className="grid grid-cols-2 gap-2">
-              <PictureChoice
-                label="Flat on the wall"
-                description="Faces the street, sits flush"
-                imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg"
-                selected={!isPerpendicular}
-                onClick={() => setIsPerpendicular(false)}
-              />
-              <PictureChoice
-                label="Perpendicular (blade)"
-                description="Sticks out from the wall on a bracket"
-                imageSrc="/examples/lightbox-mount/perpendicular.jpg"
-                selected={isPerpendicular}
-                onClick={() => {
-                  setIsPerpendicular(true)
-                  if (isCorner) {
-                    setIsCorner(false)
-                    setQuad(null)
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          {/* Corner toggle — hidden when perpendicular (blade signs can't wrap a corner) */}
+          {/* Corner toggle — hidden when perpendicular (blade signs can't wrap a corner).
+              Comes first: it changes the quad's shape (4 vs 6 points), so it must be
+              decided before the area-marking canvas below. */}
           {!isPerpendicular && (
           <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
             <input
@@ -798,15 +772,60 @@ export default function NewOrderPage() {
           </label>
           )}
 
+          <QuadSelector
+            imageDataUrl={photoDataUrl}
+            corner={isCorner}
+            onChange={(q) => setQuad(q)}
+            onReferenceChange={(r) => setReference(r)}
+            onImageLoad={(w, h) => setImgDims({ w, h })}
+            referenceLabel={(() => {
+              const preset = REFERENCE_PRESETS.find(r => r.id === referenceType)
+              if (!preset || preset.inches === null) return "Reference"
+              // Strip any parenthetical (e.g. '(80")') from the label
+              return preset.label.replace(/\s*\(.*?\)\s*$/, "").trim()
+            })()}
+            referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
+            showReference={!knownSize}
+          />
+
+          {signDimensions && (
+            <p className="text-sm text-green-700 flex items-center gap-1.5">
+              <span>✓</span> Sign area marked
+            </p>
+          )}
+
+          {!knownSize && referenceTooShort && (
+            <p className="text-sm text-red-600">
+              {referenceType === "door"
+                ? "The door outline is too small to measure from — stretch it to match the full height of the door."
+                : referenceType === "brick"
+                ? "The brick outline is too small to measure from — stretch it to span a full row of bricks."
+                : "The measurement line is too short — drag the ends further apart so we can calculate the scale."}
+            </p>
+          )}
+
+          <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
+            <input
+              type="checkbox"
+              checked={knownSize}
+              onChange={e => setKnownSize(e.target.checked)}
+              className="w-4 h-4 accent-accent"
+            />
+            <div>
+              <p className="text-sm font-medium leading-tight">I already know my sign's exact size</p>
+              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Skip measuring from the photo and type the dimensions yourself.</p>
+            </div>
+          </label>
+
           {/* Reference-object preset — how we measure the sign from the photo */}
           {!knownSize && (
           <div>
             <label className="block text-sm font-medium mb-1">How we measure your sign</label>
             <p className="text-xs text-muted-foreground mb-2">
               {referenceType === "door"
-                ? "Place the door outline over a real door in your photo. A standard door is 80\" tall, so we use that to calculate your sign's exact size."
+                ? "Place the door outline over a real door in your photo. Drag it anywhere to move it, or drag the dot at the bottom to match the door's height. A standard door is 80\" tall, so we use that to calculate your sign's exact size."
                 : referenceType === "brick"
-                ? "Place the brick outline over one full row of bricks on the wall. A standard brick row is 8\" tall — that gives us the scale we need."
+                ? "Place the brick outline over one full row of bricks on the wall. Drag it anywhere to move it, or drag the dot at the bottom to match the row's height. A standard brick row is 8\" tall — that gives us the scale we need."
                 : "Mark any object in the photo whose real size you know, then type its length below. We'll use that to work out your sign's size."}
             </p>
             <select
@@ -921,37 +940,33 @@ export default function NewOrderPage() {
           </div>
           )}
 
-          <QuadSelector
-            imageDataUrl={photoDataUrl}
-            corner={isCorner}
-            onChange={(q) => setQuad(q)}
-            onReferenceChange={(r) => setReference(r)}
-            onImageLoad={(w, h) => setImgDims({ w, h })}
-            referenceLabel={(() => {
-              const preset = REFERENCE_PRESETS.find(r => r.id === referenceType)
-              if (!preset || preset.inches === null) return "Reference"
-              // Strip any parenthetical (e.g. '(80")') from the label
-              return preset.label.replace(/\s*\(.*?\)\s*$/, "").trim()
-            })()}
-            referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
-            showReference={!knownSize}
-          />
-
-          {signDimensions && (
-            <p className="text-sm text-green-700 flex items-center gap-1.5">
-              <span>✓</span> Sign area marked
-            </p>
-          )}
-
-          {!knownSize && referenceTooShort && (
-            <p className="text-sm text-red-600">
-              {referenceType === "door"
-                ? "The door outline is too small to measure from — stretch it to match the full height of the door."
-                : referenceType === "brick"
-                ? "The brick outline is too small to measure from — stretch it to span a full row of bricks."
-                : "The measurement line is too short — drag the ends further apart so we can calculate the scale."}
-            </p>
-          )}
+          {/* Mount type question — last: decided after the area is marked and sized */}
+          <div>
+            <p className="text-sm font-medium mb-0.5">How will the sign mount?</p>
+            <p className="text-xs text-muted-foreground mb-2">Flat signs sit against the wall. Blade signs stick out over the sidewalk so people see them walking along the street.</p>
+            <div className="grid grid-cols-2 gap-2">
+              <PictureChoice
+                label="Flat on the wall"
+                description="Faces the street, sits flush"
+                imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg"
+                selected={!isPerpendicular}
+                onClick={() => setIsPerpendicular(false)}
+              />
+              <PictureChoice
+                label="Perpendicular (blade)"
+                description="Sticks out from the wall on a bracket"
+                imageSrc="/examples/lightbox-mount/perpendicular.jpg"
+                selected={isPerpendicular}
+                onClick={() => {
+                  setIsPerpendicular(true)
+                  if (isCorner) {
+                    setIsCorner(false)
+                    setQuad(null)
+                  }
+                }}
+              />
+            </div>
+          </div>
 
           <div className="flex gap-3">
             <button onClick={() => setStep("photo")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
@@ -1676,8 +1691,32 @@ export default function NewOrderPage() {
         <div className="space-y-6">
           <div>
             <h1 className="text-2xl font-bold">Review & submit</h1>
-            <p className="text-muted-foreground mt-1">Check your details below, then send your order out for quotes.</p>
+            <p className="text-muted-foreground mt-1">
+              {previewDataUrl
+                ? "Here's the sign you're ordering — check the details below, then send it out for quotes."
+                : "Check your details below, then send your order out for quotes."}
+            </p>
           </div>
+
+          {/* ── Selected AI preview — shown up front so the client sees the actual
+              sign before the spec list, instead of a buried "Included ✓" row ── */}
+          {previewDataUrl ? (
+            <div>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={previewDataUrl}
+                alt="Your selected sign preview"
+                className="w-full aspect-video object-cover rounded-xl border border-border"
+              />
+              <p className="text-xs text-muted-foreground mt-1.5">
+                AI-generated preview — your sign company will confirm exact details on-site.
+              </p>
+            </div>
+          ) : previewSkipped ? (
+            <div className="border border-border rounded-xl p-4 text-sm text-muted-foreground bg-muted/30">
+              A preview wasn't generated for this order — sign companies will still quote based on the details below.
+            </div>
+          ) : null}
 
           {/* ── Installation ── */}
           <div>
@@ -1823,6 +1862,7 @@ export default function NewOrderPage() {
                 )}
                 <Row label="Lighting" value={
                   computedReferenceId === "no-light-outdoor" ? "No illumination"
+                  : signCategory === "letters" ? (LIGHTING_STYLE_LABELS[lightingStyle] ?? "Front-lit")
                   : selectedReference.lightingType === "front" ? "Front-lit"
                   : selectedReference.lightingType === "back" ? "Back-lit halo"
                   : "Front + back lit"
@@ -1840,7 +1880,6 @@ export default function NewOrderPage() {
                 : "Client unsure — SC to confirm"
               } />
             )}
-            <Row label="AI preview" value={previewDataUrl ? "Included ✓" : previewSkipped ? "Not available for this sign type" : "Skipped"} />
           </div>
 
           <div className="border border-border rounded-xl p-4 text-sm text-muted-foreground space-y-1">

@@ -34,10 +34,6 @@ const LOUPE_CSS_OFFSET = 90
 // Minimum length (in CSS px) for the door/brick reference to prevent collapse
 const MIN_REF_LEN_CSS_PX = 24
 
-// Resize grip dimensions (CSS px) for door/brick sticker mode
-const GRIP_W_CSS = 44
-const GRIP_H_CSS = 22
-
 function defaultQuad(corner: boolean): QuadPoint[] {
   if (corner) return [
     { x: 0.175, y: 0.15 }, // 0 TL
@@ -223,48 +219,32 @@ function drawBrickIcon(ctx: CanvasRenderingContext2D, ax: number, ay: number, bx
   ctx.restore()
 }
 
-// Draw the resize grip pill at point B (canvas px coords) for door/brick sticker mode.
-// Returns the pill rect (canvas px) so hit-testing can reuse it.
-function drawResizeGrip(
-  ctx: CanvasRenderingContext2D,
-  bx: number,
-  by: number,
-  scale: number,
-  coarse: boolean,
-): { left: number; top: number; right: number; bottom: number } {
-  const gripW = GRIP_W_CSS * scale
-  const gripH = GRIP_H_CSS * scale
-  const rx = gripW / 2 // pill corner radius
+// Point-in-polygon (ray casting) — used to hit-test "inside the quad/reference
+// body" for whole-shape drag, in canvas-px space. Works for any simple polygon,
+// including the non-convex 6-point corner-sign hexagon.
+function pointInPolygon(x: number, y: number, poly: { x: number; y: number }[]): boolean {
+  let inside = false
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const xi = poly[i].x, yi = poly[i].y
+    const xj = poly[j].x, yj = poly[j].y
+    const intersects = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
+    if (intersects) inside = !inside
+  }
+  return inside
+}
 
-  const left = bx - gripW / 2
-  const top = by - gripH / 2
-  const right = bx + gripW / 2
-  const bottom = by + gripH / 2
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.roundRect(left, top, gripW, gripH, rx)
-  ctx.fillStyle = "white"
-  ctx.fill()
-  ctx.strokeStyle = "rgba(120,66,18,0.95)"
-  ctx.lineWidth = 2.5
-  ctx.stroke()
-
-  // ↕ glyph centered in pill
-  ctx.fillStyle = "rgba(120,66,18,0.95)"
-  ctx.font = `bold ${Math.round(gripH * 0.65)}px system-ui`
-  ctx.textAlign = "center"
-  ctx.textBaseline = "middle"
-  ctx.fillText("↕", bx, by)
-  ctx.restore()
-
-  // return slightly expanded rect for hit-testing when coarse
-  const expand = coarse ? TOUCH_HIT_CSS_RADIUS * scale : 0
+// Handle-index scheme: quad corners come first (0..quadLen-1), then any
+// hit-testable reference points (ruler mode: A, B; sticker mode: only B — A is
+// a fixed pivot, not directly draggable), then two "whole shape" body-drag
+// indices. Centralized here so findHandle/draw/onDown/onMove/onHover/onUp agree.
+function bodyDragIndices(quadLen: number, showReference: boolean, isStickerMode: boolean) {
+  const refPointCount = !showReference ? 0 : isStickerMode ? 1 : 2
+  const pointHandleCount = quadLen + refPointCount
   return {
-    left: left - expand,
-    top: top - expand,
-    right: right + expand,
-    bottom: bottom + expand,
+    refPointCount,
+    pointHandleCount,
+    REF_BODY: pointHandleCount,
+    QUAD_BODY: pointHandleCount + 1,
   }
 }
 
@@ -274,11 +254,10 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
   const quadRef = useRef<QuadPoint[]>(defaultQuad(corner))
   const referenceRef = useRef<QuadPoint[]>(defaultReference())
   const draggingRef = useRef<number | null>(null)
-  // Last pointer position (normalized) while dragging the whole reference icon body
+  // Last pointer position (normalized) while dragging a whole shape's body
+  // (either the quad or the reference icon — only one drag is active at a time)
   const bodyDragLastRef = useRef<{ x: number; y: number } | null>(null)
   const prevCornerRef = useRef(corner)
-  // Cached grip rect in canvas px (updated each draw, used by findHandle)
-  const gripRectRef = useRef<{ left: number; top: number; right: number; bottom: number } | null>(null)
   const [, forceRender] = useState(0)
   const [isCoarse, setIsCoarse] = useState(false)
 
@@ -527,6 +506,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     const refPts = reference.map(p => ({ x: p.x * W, y: p.y * H }))
     const refActiveIdx = activeIdx !== null && activeIdx >= quad.length ? activeIdx - quad.length : null
     const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
+    const { pointHandleCount } = bodyDragIndices(quad.length, showReference, isStickerMode)
 
     if (showReference) {
     {
@@ -654,16 +634,31 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       }
     }
 
+    const refHandleR = isCoarse ? TOUCH_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.2 : HANDLE_RADIUS + 3
+
     if (isStickerMode) {
-      // Sticker mode: render only the resize grip at B; no A/B endpoint circles.
-      const scale = canvasScale(canvas)
-      const bx = refPts[1].x, by = refPts[1].y
-      const rect = drawResizeGrip(ctx, bx, by, scale, isCoarse)
-      gripRectRef.current = rect
+      // Sticker mode: a single plain handle dot at B — same visual language as
+      // every other handle on this canvas (quad corners, ruler A/B). A is a
+      // fixed pivot and isn't independently draggable, so it gets no dot.
+      const p = refPts[1]
+      const isActive = isCoarse && refActiveIdx === 0
+      const r = isActive ? refHandleR * 1.25 : refHandleR
+      if (isActive) {
+        ctx.beginPath()
+        ctx.arc(p.x, p.y, r + 5, 0, Math.PI * 2)
+        ctx.strokeStyle = "rgba(120, 66, 18, 0.55)"
+        ctx.lineWidth = 3
+        ctx.stroke()
+      }
+      ctx.beginPath()
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+      ctx.fillStyle = "white"
+      ctx.fill()
+      ctx.strokeStyle = "rgba(120,66,18,0.95)"
+      ctx.lineWidth = 2.5
+      ctx.stroke()
     } else {
-      // Ruler mode: render classic A/B endpoint circles.
-      gripRectRef.current = null
-      const refHandleR = isCoarse ? TOUCH_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.2 : HANDLE_RADIUS + 3
+      // Ruler mode: classic A/B endpoint circles.
       refPts.forEach((p, i) => {
         const isActive = isCoarse && i === refActiveIdx
         const r = isActive ? refHandleR * 1.25 : refHandleR
@@ -689,15 +684,18 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
         ctx.fillText(i === 0 ? "A" : "B", p.x, p.y)
       })
     }
-    } else {
-      gripRectRef.current = null
     }
 
-    // Loupe: show for touch drags, but NOT for reference indices in sticker mode.
-    const showLoupe = isCoarse && activeIdx !== null && activeIdx < quad.length + 2
-    const suppressLoupeForSticker = isStickerMode && activeIdx !== null && activeIdx >= quad.length
-    if (showLoupe && !suppressLoupeForSticker) {
-      const activePt = activeIdx! < quad.length ? pts[activeIdx!] : refPts[activeIdx! - quad.length]
+    // Loupe: only for individual point handles (quad corners, ruler A/B, or the
+    // sticker's B dot) — never while dragging a whole shape's body, since that's
+    // a coarse repositioning move, not a precise point placement.
+    const showLoupe = isCoarse && activeIdx !== null && activeIdx < pointHandleCount
+    if (showLoupe) {
+      const activePt = activeIdx! < quad.length
+        ? pts[activeIdx!]
+        : isStickerMode
+        ? refPts[1]
+        : refPts[activeIdx! - quad.length]
       drawLoupe(ctx, canvas, W, H, activePt.x, activePt.y)
     }
   }
@@ -712,32 +710,38 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     return { dist: Math.hypot(x - (ax + dx * t), y - (ay + dy * t)), t }
   }
 
-  // Combined index space: 0..quad.length-1 are quad handles, quad.length and
-  // quad.length+1 are the reference-line endpoints, quad.length+2 means "the
-  // whole reference icon body" (grab anywhere on the door/brick and move it) —
-  // shared so a single pointer-tracking codepath (findHandle/onMove/onUp)
-  // drives all of them.
+  // Combined index space (see bodyDragIndices): 0..quad.length-1 are quad
+  // corners, then any hit-testable reference points (ruler mode: A, B; sticker
+  // mode: just B — A is a fixed pivot), then REF_BODY ("grab anywhere on the
+  // door/brick/ruler and move it") and QUAD_BODY ("grab anywhere inside the
+  // gold box and move it") — shared so a single pointer-tracking codepath
+  // (findHandle/onDown/onMove/onHover/onUp) drives all of them. Quad-body is
+  // checked before reference-body so the box — the primary thing being
+  // adjusted on this step — wins when the two shapes overlap.
   function findHandle(x: number, y: number, W: number, H: number, canvas: HTMLCanvasElement, coarse: boolean): number | null {
     const quad = quadRef.current
     const reference = referenceRef.current
     const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
+    const { REF_BODY, QUAD_BODY } = bodyDragIndices(quad.length, showReference, isStickerMode)
 
-    // In sticker mode: only quad handles are in the allPoints array (no A/B circles).
-    // In ruler mode: all points including A and B are hit-testable.
-    // When showReference is false, the reference is invisible — never include
-    // it in hit-testing so users can't accidentally interact with it.
-    const allPoints = (!showReference || isStickerMode) ? [...quad] : [...quad, ...reference]
+    // Point handles: quad corners, plus (when visible) reference points. In
+    // sticker mode only B is a point handle — A stays a fixed, non-draggable pivot.
+    const pointHandles: QuadPoint[] = !showReference
+      ? [...quad]
+      : isStickerMode
+      ? [...quad, reference[1]]
+      : [...quad, ...reference]
 
     let hit: number | null = null
     if (!coarse) {
-      for (let i = 0; i < allPoints.length; i++) {
-        const dist = Math.hypot(x - allPoints[i].x * W, y - allPoints[i].y * H)
+      for (let i = 0; i < pointHandles.length; i++) {
+        const dist = Math.hypot(x - pointHandles[i].x * W, y - pointHandles[i].y * H)
         if (dist <= HANDLE_RADIUS * 1.8) { hit = i; break }
       }
     } else {
       const tolerance = TOUCH_HIT_CSS_RADIUS * canvasScale(canvas)
       let nearestDist = Infinity
-      allPoints.forEach((p, i) => {
+      pointHandles.forEach((p, i) => {
         const dist = Math.hypot(x - p.x * W, y - p.y * H)
         if (dist <= tolerance && dist < nearestDist) {
           nearestDist = dist
@@ -747,17 +751,13 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     }
     if (hit !== null) return hit
 
+    // Whole-quad body drag — grab anywhere inside the gold box to move it.
+    const quadPts = quad.map(p => ({ x: p.x * W, y: p.y * H }))
+    if (pointInPolygon(x, y, quadPts)) return QUAD_BODY
+
     if (!showReference) return null
 
-    if (isStickerMode) {
-      // Sticker mode: check resize grip BEFORE body drag, so the grip wins.
-      const grip = gripRectRef.current
-      if (grip && x >= grip.left && x <= grip.right && y >= grip.top && y <= grip.bottom) {
-        return quad.length + 1 // B (resize grip)
-      }
-    }
-
-    // Body drag hit-test — check the reference icon silhouette.
+    // Whole-reference body drag — grab anywhere on the door/brick/ruler icon.
     const ax = reference[0].x * W, ay = reference[0].y * H
     const bx = reference[1].x * W, by = reference[1].y * H
     const len = Math.hypot(bx - ax, by - ay)
@@ -767,7 +767,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       9 // ruler band half-width
     const grabTolerance = Math.max(halfWidth, (coarse ? TOUCH_HIT_CSS_RADIUS : 12) * canvasScale(canvas))
     const { dist } = pointToSegment(x, y, ax, ay, bx, by)
-    if (dist <= grabTolerance) return quad.length + 2
+    if (dist <= grabTolerance) return REF_BODY
     return null
   }
 
@@ -781,8 +781,11 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       if (!canvas) return
       canvas.setPointerCapture(e.pointerId)
       const { x, y } = getCanvasCoords(e, canvas)
-      draggingRef.current = findHandle(x, y, canvas.width, canvas.height, canvas, isCoarse)
-      if (draggingRef.current === quadRef.current.length + 2) {
+      const idx = findHandle(x, y, canvas.width, canvas.height, canvas, isCoarse)
+      draggingRef.current = idx
+      const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
+      const { REF_BODY, QUAD_BODY } = bodyDragIndices(quadRef.current.length, showReference, isStickerMode)
+      if (idx === QUAD_BODY || idx === REF_BODY) {
         bodyDragLastRef.current = { x: x / canvas.width, y: y / canvas.height }
       }
       draw()
@@ -803,10 +806,31 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       }
       const quad = quadRef.current
       const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
+      const { REF_BODY, QUAD_BODY } = bodyDragIndices(quad.length, showReference, isStickerMode)
 
       if (idx < quad.length) {
         quad[idx] = point
-      } else if (idx === quad.length + 2) {
+      } else if (idx === QUAD_BODY) {
+        // Whole-box drag: translate every corner by the pointer delta, clamped
+        // so no corner leaves the image. Reposition the box first, then
+        // fine-tune individual corners — much less fiddly on a touchscreen
+        // than nudging all 4 corners across the photo one at a time.
+        const last = bodyDragLastRef.current
+        if (last) {
+          let dx = point.x - last.x
+          let dy = point.y - last.y
+          const minX = Math.min(...quad.map(p => p.x))
+          const maxX = Math.max(...quad.map(p => p.x))
+          const minY = Math.min(...quad.map(p => p.y))
+          const maxY = Math.max(...quad.map(p => p.y))
+          dx = Math.max(-minX, Math.min(1 - maxX, dx))
+          dy = Math.max(-minY, Math.min(1 - maxY, dy))
+          for (let i = 0; i < quad.length; i++) {
+            quad[i] = { x: quad[i].x + dx, y: quad[i].y + dy }
+          }
+          bodyDragLastRef.current = point
+        }
+      } else if (idx === REF_BODY) {
         // Whole-icon drag: translate both reference endpoints by the pointer
         // delta, clamped so neither endpoint leaves the image.
         const last = bodyDragLastRef.current
@@ -824,8 +848,8 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
           ref[1] = { x: ref[1].x + dx, y: ref[1].y + dy }
           bodyDragLastRef.current = point
         }
-      } else if (idx === quad.length + 1 && isStickerMode) {
-        // Resize grip drag (sticker mode): B.y only; B.x locked to A.x; enforce min length.
+      } else if (idx === quad.length && isStickerMode) {
+        // Sticker mode's only point handle (B): Y only; X locked to A.x; enforce min length.
         const ref = referenceRef.current
         const minLenNorm = MIN_REF_LEN_CSS_PX / H
         const newByY = Math.max(0, Math.min(1, point.y))
@@ -847,9 +871,10 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       const idx = findHandle(x, y, canvas.width, canvas.height, canvas, false)
       const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
       const quad = quadRef.current
-      if (idx === quad.length + 1 && isStickerMode) {
+      const { REF_BODY, QUAD_BODY } = bodyDragIndices(quad.length, showReference, isStickerMode)
+      if (idx === quad.length && isStickerMode) {
         canvas.style.cursor = "ns-resize"
-      } else if (idx === quad.length + 2) {
+      } else if (idx === REF_BODY || idx === QUAD_BODY) {
         canvas.style.cursor = "move"
       } else if (idx !== null) {
         canvas.style.cursor = "grab"
@@ -861,7 +886,10 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     function onUp() {
       if (draggingRef.current !== null) {
         const idx = draggingRef.current
-        if (idx < quadRef.current.length) {
+        const quad = quadRef.current
+        const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
+        const { QUAD_BODY } = bodyDragIndices(quad.length, showReference, isStickerMode)
+        if (idx < quad.length || idx === QUAD_BODY) {
           onChange([...quadRef.current])
         } else {
           onReferenceChange?.([...referenceRef.current])
