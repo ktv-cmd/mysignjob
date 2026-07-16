@@ -91,5 +91,18 @@ export async function saveGuestProfile(fullName: string, phone: string, email?: 
   const update: Record<string, string> = { full_name: fullName, phone }
   if (email) update.email = email
   const { error } = await supabase.from("users").update(update).eq("id", user.id)
-  return error ? { error: error.message } : {}
+
+  if (error?.code === "23505") {
+    // Every guest checkout mints a brand-new anonymous user (no login), so a
+    // returning guest who reuses their email collides with the account it's
+    // already attached to — expected, not a real error. Retry without the
+    // email so the order still saves; phone remains the primary contact and
+    // email was already optional in the UI.
+    if (!email) return { error: "Something went wrong saving your details. Please try again." }
+    const { error: retryError } = await supabase.from("users").update({ full_name: fullName, phone }).eq("id", user.id)
+    return retryError ? { error: "Something went wrong saving your details. Please try again." } : {}
+  }
+
+  // Never surface raw database error text to the client.
+  return error ? { error: "Something went wrong saving your details. Please try again." } : {}
 }
