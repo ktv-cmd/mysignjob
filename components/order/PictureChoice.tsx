@@ -39,10 +39,17 @@ export default function PictureChoice({
   const hasError = failedSrcs.has(activeSrc)
 
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onClick}
-      className={`relative text-left rounded-xl border-2 overflow-hidden transition-all
+      onKeyDown={e => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          onClick()
+        }
+      }}
+      className={`relative text-left rounded-xl border-2 overflow-hidden transition-all cursor-pointer
         ${selected ? "border-accent shadow-sm" : "border-border hover:border-accent/40"}`}
     >
       <div className={`bg-muted overflow-hidden relative aspect-square`}>
@@ -71,7 +78,7 @@ export default function PictureChoice({
               e.stopPropagation()
               setShowNight(prev => !prev)
             }}
-            className="absolute top-2 left-2 bg-black/50 hover:bg-black/70 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs shadow"
+            className="absolute top-1 left-1 bg-black/50 hover:bg-black/70 text-white rounded-full w-11 h-11 flex items-center justify-center text-xs shadow"
             aria-label={showNight ? "Show day photo" : "Show night photo"}
           >
             {showNight ? "☀️" : "🌙"}
@@ -103,6 +110,6 @@ export default function PictureChoice({
           ✓
         </span>
       )}
-    </button>
+    </div>
   )
 }

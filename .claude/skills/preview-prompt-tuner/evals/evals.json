@@ -1,0 +1,47 @@
+{
+  "skill_name": "preview-prompt-tuner",
+  "evals": [
+    {
+      "id": 0,
+      "eval_name": "blade-mount-bug",
+      "prompt": "Customers who pick the blade/perpendicular mount for their light box are getting AI previews that show a flat wall-mounted sign instead of a projecting double-sided sign. Find out why and fix it.",
+      "expected_output": "Diagnoses that `is_perpendicular` is captured in the order flow but never threaded through PreviewJobParams / buildSignPrompt, and fixes it so a blade-mounted light box prompt describes a projecting, double-sided cabinet mounted perpendicular to the wall (both faces visible/readable), consistent with how the rest of the case system is structured.",
+      "files": [],
+      "assertions": [
+        "Report correctly names is_perpendicular (or the equivalent mount-type field) as never reaching PreviewJobParams/buildSignPrompt as the root cause",
+        "Diff adds a mount/perpendicular field to PreviewJobParams in lib/ai/preview.ts",
+        "Diff updates lib/sign-prompt.ts prompt text to describe a projecting, double-sided cabinet (not a flat wall cabinet) when the mount is perpendicular",
+        "The new field is actually wired end-to-end from where is_perpendicular is captured through to the buildSignPrompt call, not just added to a type and left unused",
+        "Existing flat-mount light-box behavior is left intact (no regression to the non-blade case)"
+      ]
+    },
+    {
+      "id": 1,
+      "eval_name": "monument-sign-case",
+      "prompt": "We want to support monument signs — freestanding ground signs at the edge of a parking lot, not mounted on the building wall. Add this as a new sign type to the preview pipeline.",
+      "expected_output": "Adds a new structural case: a new referenceId/branch in buildBasePrompt (or equivalent), plus a corresponding CASE block in SIGN_SYSTEM_INSTRUCTION describing freestanding ground-level construction (base/footing, not wall-mounted, no wall-restoration/mask-erasure semantics since there's no wall zone to erase). Should recognize this doesn't fit the existing wall-mounted CASE A/B/C model and adapt the mask/geometry story accordingly rather than forcing it into the wall-mount frame.",
+      "files": [],
+      "assertions": [
+        "Diff adds a new branch/referenceId in buildBasePrompt (lib/sign-prompt.ts) dedicated to monument/freestanding signs",
+        "Diff adds a corresponding new CASE block to SIGN_SYSTEM_INSTRUCTION in lib/ai/preview.ts",
+        "Report or diff explicitly reasons about the mask-erasure / gold-zone / wall-texture-restoration language NOT applying the same way to a freestanding ground sign, rather than silently reusing wall-mount logic as-is",
+        "PreviewJobParams / SignPromptParams types are extended without breaking existing required fields for other cases",
+        "Solution describes a base/footing or ground-level construction detail appropriate to a freestanding sign (not just a wall case relabeled)"
+      ]
+    },
+    {
+      "id": 2,
+      "eval_name": "logo-redraw-debug",
+      "prompt": "A client says their logo came out completely redesigned in the AI preview — different font, icon moved to a different spot — even though their original logo file looks totally fine. Investigate why and fix it.",
+      "expected_output": "Identifies this as the known logo-fidelity failure mode, checks whether logoFidelityClause() is actually being applied for this case (including the carve-out where logo-only + no-backer-panel skips the generic clause and relies on its own inline wording), and either strengthens the fidelity language or fixes a case where the clause isn't reaching the final prompt.",
+      "files": [],
+      "assertions": [
+        "Report identifies this as the known logo-fidelity failure mode and investigates logoFidelityClause() specifically",
+        "Report checks (and correctly reasons about) the carve-out where the logo-only + no-backer-panel branch skips the generic fidelity clause in favor of its own inline wording",
+        "Fix targets the specific case/branch diagnosed as broken, rather than a broad untargeted rewrite of prompt text",
+        "Fix does not remove or weaken sanitizeUserText / length-cap prompt-injection protections while editing nearby code",
+        "Other brandMode branches (text-only, logo-and-text) are left working after the change"
+      ]
+    }
+  ]
+}

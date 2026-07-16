@@ -291,6 +291,16 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     return () => mq.removeEventListener("change", update)
   }, [])
 
+  // Report the initial default quad to the parent on mount. Without this, the
+  // box is drawn on the canvas but the parent's `quad` stays null until the
+  // user drags a handle, hits Reset, or toggles corner mode — so a client who
+  // uses "I already know my sign's exact size" and never touches the box can
+  // reach the AI preview step with quad still null, silently blocking generation.
+  useEffect(() => {
+    onChange([...quadRef.current])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // When referenceIcon changes to door/brick, snap any non-vertical reference
   // so B.x === A.x (keeps the normalized length, only zeroes horizontal offset).
   useEffect(() => {
@@ -905,7 +915,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
         <button
           type="button"
           onClick={resetQuad}
-          className="text-xs text-muted-foreground hover:text-foreground underline"
+          className="py-3.5 pl-3 -mr-3 text-xs text-muted-foreground hover:text-foreground underline flex-shrink-0"
         >
           Reset
         </button>

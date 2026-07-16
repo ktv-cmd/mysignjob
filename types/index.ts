@@ -116,7 +116,9 @@ export interface SignSpec {
   light_box_shape?: string      // e.g. "rectangle", "circle", "oval", "rounded"
   is_perpendicular?: boolean    // wall-mounted perpendicular (blade sign); default false = flush to wall
   // Advanced lighting (when is_lit = true)
-  light_warmth?: number         // 0-100, default 50 (cool←→warm); null/undefined = default
+  light_warmth?: number         // LED color temperature in Kelvin — one of the standard bins
+                                // sign shops stock (2700/4000/4500/5000/6000/8000/10000/12000);
+                                // null/undefined = default (see DEFAULT_LIGHT_WARMTH_K)
   light_colorful?: boolean      // Multicolor RGB mode; default false
   // Awning-specific (only when sign_category === "awning")
   awning_frame_style?: AwningFrameStyle

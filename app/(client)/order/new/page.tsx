@@ -21,6 +21,7 @@ import {
   type FontStyle,
 } from "@/lib/sign-references"
 import PictureChoice from "@/components/order/PictureChoice"
+import LightWarmthSlider, { DEFAULT_LIGHT_WARMTH_K } from "@/components/order/LightWarmthSlider"
 import { buildSignPrompt, type SignPromptParams } from "@/lib/sign-prompt"
 
 type Step = "photo" | "quad" | "customize" | "preview" | "review"
@@ -259,13 +260,13 @@ export default function NewOrderPage() {
   const [awningFabric, setAwningFabric] = useState<SunbrellaFabric>(DEFAULT_AWNING_FABRIC)
   const [awningIllumination, setAwningIllumination] = useState<IlluminationType>("none")
   // New tree structure: sign type selector
-  const [signCategory, setSignCategory] = useState<"letters" | "light_box" | "awning" | null>(null)
+  const [signCategory, setSignCategory] = useState<"letters" | "light_box" | "awning" | null>("letters")
   const [isLit, setIsLit] = useState<boolean | null>(null)
   const [lightingStyle, setLightingStyle] = useState<"front" | "back" | "back_side" | "front_back" | "front_side" | "full">("front")
   const [lightBoxType, setLightBoxType] = useState<"cabinet" | "seethrough_letters">("cabinet")
   const [isPerpendicular, setIsPerpendicular] = useState(false)
   const [lightBoxShape, setLightBoxShape] = useState<string>("rectangle")
-  const [lightWarmth, setLightWarmth] = useState<number>(50)
+  const [lightWarmth, setLightWarmth] = useState<number>(DEFAULT_LIGHT_WARMTH_K)
   const [lightColorful, setLightColorful] = useState<boolean>(false)
   const [showAllColors, setShowAllColors] = useState(false)
   // Corner / wraparound sign
@@ -506,7 +507,13 @@ export default function NewOrderPage() {
   }
 
   async function runPreview() {
-    if (!photoDataUrl || !quad) return
+    // Defense in depth: this should be unreachable now that QuadSelector reports
+    // its default quad on mount, but a silent no-op here previously meant a
+    // missing quad hung the AI preview step forever with zero user feedback.
+    if (!photoDataUrl || !quad) {
+      setGenerateError("We're missing your photo or the marked sign area. Please go back and confirm the sign area box on your photo.")
+      return
+    }
 
     // Show the guest capture modal instead of hitting the 401 wall
     const { data: { user } } = await createBrowserClient().auth.getUser()
@@ -753,7 +760,6 @@ export default function NewOrderPage() {
                 label="Flat on the wall"
                 description="Faces the street, sits flush"
                 imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg"
-                nightImageSrc="/examples/letters-lighting-bg/front_light_night.jpg"
                 selected={!isPerpendicular}
                 onClick={() => setIsPerpendicular(false)}
               />
@@ -761,7 +767,6 @@ export default function NewOrderPage() {
                 label="Perpendicular (blade)"
                 description="Sticks out from the wall on a bracket"
                 imageSrc="/examples/lightbox-mount/perpendicular.jpg"
-                nightImageSrc="/examples/lightbox-mount/perpendicular_night.jpg"
                 selected={isPerpendicular}
                 onClick={() => {
                   setIsPerpendicular(true)
@@ -812,7 +817,7 @@ export default function NewOrderPage() {
                 const preset = REFERENCE_PRESETS.find(r => r.id === id)
                 if (preset?.inches != null) setReferenceInches(preset.inches)
               }}
-              className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             >
               {REFERENCE_PRESETS.map(r => (
                 <option key={r.id} value={r.id}>{r.label}</option>
@@ -826,7 +831,7 @@ export default function NewOrderPage() {
                 value={referenceInches}
                 onChange={e => setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)}
                 placeholder="Length in inches (e.g. 36)"
-                className="mt-2 w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                className="mt-2 w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
             )}
           </div>
@@ -849,7 +854,7 @@ export default function NewOrderPage() {
                       value={knownFrontWidthInches || ""}
                       onChange={e => setKnownFrontWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                       placeholder="e.g. 60"
-                      className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
                   <div>
@@ -861,7 +866,7 @@ export default function NewOrderPage() {
                       value={knownSideWidthInches || ""}
                       onChange={e => setKnownSideWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                       placeholder="e.g. 36"
-                      className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
                 </div>
@@ -874,7 +879,7 @@ export default function NewOrderPage() {
                     value={knownHeightInches || ""}
                     onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
                     placeholder="e.g. 24"
-                    className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
               </>
@@ -889,7 +894,7 @@ export default function NewOrderPage() {
                     value={knownWidthInches || ""}
                     onChange={e => setKnownWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                     placeholder="e.g. 60"
-                    className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
                 <div>
@@ -901,7 +906,7 @@ export default function NewOrderPage() {
                     value={knownHeightInches || ""}
                     onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
                     placeholder="e.g. 24"
-                    className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                   />
                 </div>
               </div>
@@ -1045,7 +1050,7 @@ export default function NewOrderPage() {
                   }
                 }}
                 placeholder="e.g. Joe's Pizza"
-                className="w-full rounded-lg border border-border px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
             </div>
 
@@ -1088,7 +1093,7 @@ export default function NewOrderPage() {
               ) : (
                 <div className="grid grid-cols-3 gap-2">
                   <PictureChoice
-                    imageSrc="/examples/sign-type/letters.jpg"
+                    imageSrc="/examples/sign-type/Letters.jpg"
                     label="Letters"
                     description="Channel letters or flat-cut dimensional signage"
                     selected={signCategory === "letters"}
@@ -1261,29 +1266,18 @@ export default function NewOrderPage() {
                       </div>
                     </div>
 
-                    {/* Advanced: warmth + colorful */}
-                    <details className="border border-border rounded-xl overflow-hidden group">
-                      <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
+                    {/* Advanced: warmth + colorful — dark panel throughout so the
+                        light-warmth glow reads correctly against darkness */}
+                    <details className="border border-white/10 bg-zinc-900 rounded-xl overflow-hidden group">
+                      <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium text-white select-none hover:bg-white/5">
                         <span>Advanced lighting settings</span>
-                        <span className="text-xs text-muted-foreground group-open:hidden">show</span>
-                        <span className="text-xs text-muted-foreground hidden group-open:inline">hide</span>
+                        <span className="text-xs text-white/50 group-open:hidden">show</span>
+                        <span className="text-xs text-white/50 hidden group-open:inline">hide</span>
                       </summary>
                       <div className="px-4 pb-4 space-y-3">
                         <div>
-                          <label className="block text-sm font-medium mb-2">Light warmth</label>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            value={lightWarmth}
-                            onChange={e => setLightWarmth(parseInt(e.target.value))}
-                            className="w-full"
-                          />
-                          <div className="flex justify-between text-xs text-muted-foreground mt-1">
-                            <span>Cool</span>
-                            <span>Neutral</span>
-                            <span>Warm</span>
-                          </div>
+                          <label className="block text-sm font-medium mb-2 text-white">Light warmth</label>
+                          <LightWarmthSlider value={lightWarmth} onChange={setLightWarmth} />
                         </div>
                         <label className="flex items-center gap-2">
                           <input
@@ -1292,7 +1286,7 @@ export default function NewOrderPage() {
                             onChange={e => setLightColorful(e.target.checked)}
                             className="w-4 h-4 accent-accent"
                           />
-                          <span className="text-sm font-medium">Multicolor RGB LED (programmable colors)</span>
+                          <span className="text-sm font-medium text-white">Multicolor RGB LED (programmable colors)</span>
                         </label>
                       </div>
                     </details>
@@ -1551,7 +1545,7 @@ export default function NewOrderPage() {
                     <button
                       type="button"
                       onClick={() => navigator.clipboard?.writeText(assembledPrompt)}
-                      className="text-xs text-accent font-medium hover:underline"
+                      className="py-3.5 pl-3 -mr-3 -my-2.5 text-xs text-accent font-medium hover:underline"
                     >
                       Copy
                     </button>

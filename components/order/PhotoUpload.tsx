@@ -58,7 +58,7 @@ export default function PhotoUpload({ onPhoto }: Props) {
         <button
           type="button"
           onClick={() => { setPreview(null) }}
-          className="text-xs text-muted-foreground hover:text-foreground underline"
+          className="py-3 text-xs text-muted-foreground hover:text-foreground underline"
         >
           Use a different photo
         </button>

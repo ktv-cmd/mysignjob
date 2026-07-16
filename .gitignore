@@ -43,3 +43,8 @@ next-env.d.ts
 # Local Netlify folder
 .netlify
 deno.lock
+
+# Claude Code skill-creator eval scratch data (reports/diffs/benchmarks from
+# testing runs) — disposable working data, not project source.
+.claude/skills/*-workspace/
+.claude/worktrees/

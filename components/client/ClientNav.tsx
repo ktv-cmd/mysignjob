@@ -14,11 +14,11 @@ export default function ClientNav() {
           My Sign Job
         </Link>
 
-        <nav className="flex items-center gap-6">
+        <nav className="flex items-center gap-4">
           <Link
             href="/dashboard"
             className={cn(
-              "text-sm font-medium transition-colors",
+              "flex items-center py-3 text-sm font-medium transition-colors",
               pathname === "/dashboard"
                 ? "text-foreground"
                 : "text-muted-foreground hover:text-foreground"
@@ -28,13 +28,13 @@ export default function ClientNav() {
           </Link>
           <Link
             href="/order/new"
-            className="bg-accent text-accent-foreground px-3 py-1.5 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+            className="flex items-center bg-accent text-accent-foreground px-3 py-3 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
           >
             + New Sign
           </Link>
           <Link
             href="/account"
-            className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+            className="flex items-center py-3 text-sm text-muted-foreground hover:text-foreground transition-colors"
           >
             Account
           </Link>
