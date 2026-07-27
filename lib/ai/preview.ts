@@ -114,7 +114,7 @@ function sanitizeLogoMime(value: string | undefined | null): string {
 export interface PreviewJobParams {
   quad: { x: number; y: number }[]
   referenceId: string
-  lightingType?: "front" | "back" | "both"
+  lightingType?: "front" | "back" | "both" | "front_back" | "front_side" | "back_side" | "full"
   illuminated?: boolean
   seeThroughLetters?: boolean           // light-box variant: halo-lit letters cut from an opaque panel
   businessName: string

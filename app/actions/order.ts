@@ -70,7 +70,10 @@ export async function createOrder(params: {
     .from("public-assets")
     .upload(photoPath, photoBuffer, { contentType: "image/jpeg", upsert: false })
 
-  if (photoUploadErr) return { error: photoUploadErr.message }
+  if (photoUploadErr) {
+    console.error("[createOrder] storefront photo upload failed", photoUploadErr)
+    return { error: "Could not upload your storefront photo. Please try again." }
+  }
 
   const { data: { publicUrl: storefrontUrl } } = supabase.storage
     .from("public-assets")
@@ -88,6 +91,8 @@ export async function createOrder(params: {
       .upload(logoPath, logoBuffer, { contentType: ext === "png" ? "image/png" : "image/jpeg", upsert: false })
     if (!logoErr) {
       logoUrl = supabase.storage.from("public-assets").getPublicUrl(logoPath).data.publicUrl
+    } else {
+      console.error("[createOrder] logo upload failed — order will proceed without a logo", logoErr)
     }
   }
 
@@ -108,6 +113,8 @@ export async function createOrder(params: {
 
     if (!previewErr) {
       previewUrl = supabase.storage.from("public-assets").getPublicUrl(previewPath).data.publicUrl
+    } else {
+      console.error("[createOrder] preview upload failed — order will proceed without a preview", previewErr)
     }
   }
 
@@ -125,7 +132,10 @@ export async function createOrder(params: {
     .select("id")
     .single()
 
-  if (orderErr) return { error: orderErr.message }
+  if (orderErr) {
+    console.error("[createOrder] failed to insert order", orderErr)
+    return { error: "Something went wrong submitting your order. Please try again." }
+  }
 
   return { orderId: order.id }
 }

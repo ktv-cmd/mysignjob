@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { stripe } from "@/lib/stripe/server"
 import { createServiceRoleClient } from "@/lib/supabase/service"
+import { activateSCIfEligible } from "@/app/actions/sc-onboarding"
 import type Stripe from "stripe"
 
 // Server-verified source of truth for Stripe state changes. Until now the app
@@ -43,10 +44,19 @@ export async function POST(req: NextRequest) {
 
     case "account.updated": {
       const account = event.data.object as Stripe.Account
-      await supabase
+      const payoutsEnabled = account.payouts_enabled ?? false
+
+      const { data: sc } = await supabase
         .from("sc_companies")
-        .update({ stripe_onboarding_complete: account.payouts_enabled ?? false })
+        .update({ stripe_onboarding_complete: payoutsEnabled })
         .eq("stripe_account_id", account.id)
+        .select("id, status, agreement_signed_at, insurance_verified, insurance_reviewed_at, stripe_onboarding_complete")
+        .single()
+
+      // Run the full activation gate here too — otherwise a user who finishes
+      // Stripe onboarding and never returns to the app never flips to 'active',
+      // even though every other gate already passed.
+      if (sc) await activateSCIfEligible(supabase, sc)
       break
     }
 

@@ -67,10 +67,19 @@ export async function signUpSC(_prev: AuthState, formData: FormData): Promise<Au
 
   const user = signUpData?.user
   if (user) {
-    // DB trigger hardcodes role='client'; override server-side with service role
+    // DB trigger hardcodes role='client'; override server-side with service role.
+    // The sc_companies insert must also use the service client: at this point the
+    // user has no active session yet (email confirmation is pending), so the
+    // per-request client has no auth.uid() and the RLS insert policy would fail.
     const serviceClient = createServiceRoleClient()
     await serviceClient.from("users").update({ role: "sc" }).eq("id", user.id)
-    await supabase.from("sc_companies").insert({ user_id: user.id, name: companyName })
+    const { error: scError } = await serviceClient
+      .from("sc_companies")
+      .insert({ user_id: user.id, name: companyName })
+    if (scError) {
+      console.error("[signUpSC] failed to create sc_companies row", scError)
+      return { error: "Something went wrong setting up your account. Please contact support." }
+    }
   }
 
   redirect("/check-email")

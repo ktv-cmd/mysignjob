@@ -87,7 +87,7 @@ export default function StripeOnboardingPage() {
         <div className="border border-border rounded-xl p-6 space-y-3">
           <h2 className="font-semibold">Secure payout setup via Stripe</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            My Sign Job uses Stripe Connect to send your earnings directly to your bank account.
+            Mysignjobs.com uses Stripe Connect to send your earnings directly to your bank account.
             This also verifies your business identity (name, address, EIN) automatically — no
             manual review needed.
           </p>
@@ -109,7 +109,7 @@ export default function StripeOnboardingPage() {
         </button>
 
         <p className="text-xs text-muted-foreground text-center">
-          Powered by Stripe. My Sign Job never stores your banking details.
+          Powered by Stripe. Mysignjobs.com never stores your banking details.
         </p>
       </div>
     </div>

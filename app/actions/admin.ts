@@ -1,6 +1,7 @@
 "use server"
 
 import { createClient } from "@/lib/supabase/server"
+import { revalidatePath } from "next/cache"
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -42,6 +43,63 @@ export async function approveSCInsuranceReview(scId: string): Promise<{ error?: 
     })
     .eq("id", scId)
 
-  if (updateErr) return { error: updateErr.message }
+  if (updateErr) {
+    console.error("[approveSCInsuranceReview] failed to update sc_companies", updateErr)
+    return { error: "Something went wrong saving the review. Please try again." }
+  }
   return { status: nextStatus }
+}
+
+// The platform selects which bid "wins" on the client's behalf (per the orders
+// schema's own comment: selected_bid_id is "filled after platform selects") —
+// this is a concierge marketplace, not a raw multi-bid comparison the client
+// picks from. Sets the order to 'quote_ready' so the client can review and pay
+// the deposit, and rejects every other bid on that order.
+export async function selectWinningBid(orderId: string, bidId: string): Promise<{ error?: string }> {
+  const { supabase, user, error } = await requireAdmin()
+  if (error || !user) return { error }
+
+  const { data: order } = await supabase
+    .from("orders")
+    .select("id, status")
+    .eq("id", orderId)
+    .single()
+
+  if (!order) return { error: "Order not found." }
+  if (order.status !== "bidding" && order.status !== "submitted") {
+    return { error: "This order is no longer open for bid selection." }
+  }
+
+  const { data: bid } = await supabase
+    .from("bids")
+    .select("id, order_id")
+    .eq("id", bidId)
+    .single()
+
+  if (!bid || bid.order_id !== orderId) return { error: "Bid not found for this order." }
+
+  const [{ error: winError }, { error: rejectError }, { error: orderError }] = await Promise.all([
+    supabase.from("bids").update({ status: "selected" }).eq("id", bidId),
+    supabase.from("bids").update({ status: "rejected" }).eq("order_id", orderId).neq("id", bidId),
+    supabase.from("orders").update({ selected_bid_id: bidId, status: "quote_ready" }).eq("id", orderId),
+  ])
+
+  if (winError || rejectError || orderError) {
+    console.error("[selectWinningBid] failed", { winError, rejectError, orderError })
+    return { error: "Something went wrong selecting the winning bid. Please try again." }
+  }
+
+  revalidatePath("/admin")
+  return {}
+}
+
+// Thin void-returning wrappers for use directly as a <form action> — the native
+// form action prop requires (formData) => void | Promise<void>, but the actions
+// above return a result for potential future use elsewhere.
+export async function selectWinningBidAction(orderId: string, bidId: string): Promise<void> {
+  await selectWinningBid(orderId, bidId)
+}
+
+export async function approveSCInsuranceReviewAction(scId: string): Promise<void> {
+  await approveSCInsuranceReview(scId)
 }

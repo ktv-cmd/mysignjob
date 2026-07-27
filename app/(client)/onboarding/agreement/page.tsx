@@ -5,7 +5,7 @@ import { signClientAgreement } from "@/app/actions/onboarding"
 export default async function AgreementPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
+  if (!user) redirect("/login?next=/onboarding/agreement")
 
   const { data: profile } = await supabase
     .from("users")
@@ -28,11 +28,11 @@ export default async function AgreementPage() {
       </div>
 
       <div className="border border-border rounded-xl p-6 max-h-80 overflow-y-auto text-sm leading-relaxed space-y-4 bg-muted/20">
-        <p className="font-semibold">My Sign Job — Customer Service Agreement</p>
+        <p className="font-semibold">Mysignjobs.com — Customer Service Agreement</p>
         <p>
-          This is a placeholder agreement. By accepting, you agree that My Sign Job acts as a broker
+          This is a placeholder agreement. By accepting, you agree that Mysignjobs.com acts as a broker
           connecting you with vetted, independent sign companies. Quotes are provided by these
-          companies; My Sign Job facilitates payment via escrow.
+          companies; Mysignjobs.com facilitates payment via escrow.
         </p>
         <p>
           <strong>Payments.</strong> A 50% deposit is collected once a sign company is assigned and

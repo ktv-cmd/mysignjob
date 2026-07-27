@@ -9,7 +9,7 @@ export default function SCRegisterPage() {
   const [state, action, pending] = useActionState<AuthState, FormData>(signUpSC, null)
 
   return (
-    <AuthShell title="Join as a sign company" subtitle="Apply to receive jobs on My Sign Job">
+    <AuthShell title="Join as a sign company" subtitle="Apply to receive jobs on Mysignjobs.com">
       <form action={action} className="space-y-4">
         <Field label="Company name" name="company_name" required />
         <Field label="Your name" name="full_name" autoComplete="name" required />

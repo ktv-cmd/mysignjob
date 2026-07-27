@@ -51,14 +51,14 @@ export async function POST(req: NextRequest) {
     .from("documents")
     .upload(path, buffer, { contentType: file.type, upsert: true })
 
-  if (uploadError) return NextResponse.json({ error: uploadError.message }, { status: 500 })
+  if (uploadError) {
+    console.error("[verify-insurance] storage upload failed", uploadError)
+    return NextResponse.json({ error: "Could not upload your document. Please try again." }, { status: 500 })
+  }
 
-  // The 'documents' bucket is private — generate a short-lived signed URL for
-  // internal reference only. We store the storage path, not a public URL.
-  const { data: signedData } = await supabase.storage
-    .from("documents")
-    .createSignedUrl(path, 60 * 60)  // 1-hour expiry, for internal/display use only
-  const insuranceDocPath = path  // store path; derive signed URL on demand
+  // The 'documents' bucket is private; store the storage path, not a public
+  // URL, and derive a signed URL on demand wherever this doc is displayed.
+  const insuranceDocPath = path
 
   // ── Gemini Vision OCR ──────────────────────────────────────────────────────
   const apiKey = process.env.GEMINI_API_KEY
@@ -70,7 +70,9 @@ export async function POST(req: NextRequest) {
   const mimeType = file.type === "application/pdf" ? "application/pdf" : "image/jpeg"
   const base64 = buffer.toString("base64")
 
-  const response = await ai.models.generateContent({
+  let response
+  try {
+    response = await ai.models.generateContent({
     model: "gemini-2.5-flash",
     contents: [{
       role: "user",
@@ -96,8 +98,12 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
         },
       ],
     }],
-    config: { responseMimeType: "application/json", temperature: 0 },
-  })
+      config: { responseMimeType: "application/json", temperature: 0 },
+    })
+  } catch (err) {
+    console.error("[verify-insurance] Gemini request failed", err)
+    return NextResponse.json({ error: "Could not process your document right now. Please try again." }, { status: 502 })
+  }
 
   let extracted: InsuranceExtracted
   try {
@@ -123,13 +129,23 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
     ? `${sc.state.toLowerCase()}_${sc.city.toLowerCase().replace(/\s+/g, "")}`
     : sc.state?.toLowerCase() ?? "default"
 
-  const { data: reqRow } = await supabase
+  // Priority order: city-level jurisdiction, then state-level, then default.
+  // Built as a parameterized .in() lookup (not a hand-built .or() filter string)
+  // so an SC's city/state value can never break out of the intended filter.
+  const jurisdictionCandidates = [
+    jurisdictionKey,
+    ...(sc.state ? [sc.state.toLowerCase()] : []),
+    "default",
+  ]
+
+  const { data: reqRows } = await supabase
     .from("jurisdiction_insurance_requirements")
-    .select("required_gl_cents, require_workers_comp, label")
-    .or(`jurisdiction.eq.${jurisdictionKey},jurisdiction.eq.${sc.state?.toLowerCase() ?? "none"},jurisdiction.eq.default`)
-    .order("jurisdiction", { ascending: false })  // city-level (longer slug) sorts first
-    .limit(1)
-    .single()
+    .select("required_gl_cents, require_workers_comp, label, jurisdiction")
+    .in("jurisdiction", jurisdictionCandidates)
+
+  const reqRow = jurisdictionCandidates
+    .map((key) => reqRows?.find((r) => r.jurisdiction === key))
+    .find((row) => row != null) ?? null
 
   const requiredGl = reqRow?.required_gl_cents ?? 100000000  // fallback $1M
   const requireWc = reqRow?.require_workers_comp ?? false
@@ -172,7 +188,7 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
   const verified = issues.length === 0 && extracted.confidence >= 0.6
 
   // Save results — store the storage path (not a public URL; bucket is private).
-  await supabase
+  const { error: saveError } = await supabase
     .from("sc_companies")
     .update({
       insurance_doc_url: insuranceDocPath,
@@ -184,6 +200,11 @@ Return ONLY the raw JSON object, no markdown, no explanation.`,
       insurance_notes: issues.length > 0 ? issues.join(" ") : null,
     })
     .eq("user_id", user.id)
+
+  if (saveError) {
+    console.error("[verify-insurance] failed to save extraction results", saveError)
+    return NextResponse.json({ error: "Could not save your verification results. Please try again." }, { status: 500 })
+  }
 
   // Trigger status transition if all prerequisites are met.
   // We set 'pending_review' rather than 'active' because the AI OCR result has

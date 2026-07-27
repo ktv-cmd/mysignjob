@@ -158,28 +158,3 @@ export const ACRYLIC_COLORS: AcrylicColor[] = [
 ]
 
 export const DEFAULT_ACRYLIC_COLOR = ACRYLIC_COLORS.find(c => c.code === "7328")! // White translucent
-
-// ─── Channel Letter Lighting ──────────────────────────────────────────────────
-
-export type LightType = "none" | "front" | "halo" | "front_halo" | "neon"
-export type ReturnGlow = "back_only" | "subtle_side" | "half_side" | "full_side"
-
-export interface ChannelLighting {
-  type: LightType
-  return_glow?: ReturnGlow  // only for halo / front_halo
-}
-
-export const LIGHT_TYPES: { value: LightType; label: string; desc: string }[] = [
-  { value: "none",       label: "No Light",     desc: "Day use only — no illumination" },
-  { value: "front",      label: "Front Lit",    desc: "Light emits through the acrylic face" },
-  { value: "halo",       label: "Halo / Back",  desc: "Glow behind the letters onto the wall" },
-  { value: "front_halo", label: "Front + Halo", desc: "Face glows and halo behind — maximum impact" },
-  { value: "neon",       label: "Neon",         desc: "Neon tube or LED neon strip" },
-]
-
-export const RETURN_GLOW_OPTS: { value: ReturnGlow; label: string; desc: string }[] = [
-  { value: "back_only",    label: "Back Only",    desc: "Glow only on the back wall — classic halo" },
-  { value: "subtle_side",  label: "Subtle Side",  desc: "Slight glow wraps partway onto the return" },
-  { value: "half_side",    label: "Half Side",    desc: "Glow covers half the return depth" },
-  { value: "full_side",    label: "Full Side",    desc: "Return fully illuminated — maximum glow" },
-]

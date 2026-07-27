@@ -7,7 +7,7 @@ export default async function SCDashboard() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  if (!user) redirect("/login")
+  if (!user) redirect("/login?next=/sc/dashboard")
 
   const { data: sc } = await supabase
     .from("sc_companies")
@@ -39,12 +39,17 @@ export default async function SCDashboard() {
   }
 
   // Open quote requests (bidding status, within 24hr window, SC hasn't bid yet)
-  const { data: openOrders } = await supabase
+  // Explicit FK name required: orders<->bids has two relationships
+  // (bids.order_id -> orders.id, and orders.selected_bid_id -> bids.id), so
+  // PostgREST can't infer which one "bids!left(...)" should mean.
+  const { data: openOrders, error: openOrdersError } = await supabase
     .from("orders")
-    .select("*, bids!left(id, sc_id)")
+    .select("*, bids!bids_order_id_fkey(id, sc_id)")
     .eq("status", "bidding")
     .gt("bid_deadline_at", new Date().toISOString())
     .order("created_at", { ascending: false })
+
+  if (openOrdersError) console.error("[sc/dashboard] failed to load open quote requests", openOrdersError)
 
   // Active jobs for this SC
   const { data: activeJobs } = await supabase

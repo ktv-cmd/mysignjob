@@ -5,7 +5,7 @@ import PaymentForm from "@/components/onboarding/PaymentForm"
 export default async function PaymentPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
+  if (!user) redirect("/login?next=/onboarding/payment")
 
   const { data: profile } = await supabase
     .from("users")

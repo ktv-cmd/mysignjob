@@ -172,68 +172,6 @@ const SUNBRELLA_COLORS: SunbrellaFabric[] = [
 
 const DEFAULT_AWNING_FABRIC = SUNBRELLA_COLORS.find(c => c.code === "4601")! // Pacific Blue
 
-// ── Dura-Bond / panel color picker (reusable for face + bg) ─────────────────
-function PanelColorPicker({
-  label, subtitle, selected, onSelect, visible, showAll, onToggleAll, total,
-}: {
-  label: string
-  subtitle: string
-  selected: PanelColor
-  onSelect: (c: PanelColor) => void
-  visible: PanelColor[]
-  showAll: boolean
-  onToggleAll: () => void
-  total: number
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium mb-1">{label}</label>
-      <p className="text-xs text-muted-foreground mb-3">
-        {subtitle}. Selected: <span className="font-medium">{selected.name}</span>
-        <span className="text-muted-foreground"> · {selected.code}</span>
-        {selected.finish && selected.finish !== "solid" && (
-          <span className="ml-1 capitalize text-accent">· {selected.finish}</span>
-        )}
-      </p>
-      <div className="grid grid-cols-6 gap-2">
-        {visible.map(c => {
-          const isSelected = c.code === selected.code
-          const bgStyle: React.CSSProperties = c.finish === "metallic" || c.finish === "mirror"
-            ? { background: `linear-gradient(135deg, ${c.hex}ee, ${c.hex}88, ${c.hex}dd)` }
-            : c.finish === "wood"
-            ? { background: `repeating-linear-gradient(90deg, ${c.hex} 0px, ${c.hex}cc 3px, ${c.hex}99 6px)` }
-            : { background: c.hex }
-          return (
-            <button key={c.code} type="button" title={`${c.name} (${c.code})`}
-              onClick={() => onSelect(c)}
-              className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                ${isSelected ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}>
-              <div className="w-full h-full" style={bgStyle} />
-              <div className="absolute inset-0 flex items-end justify-center pb-0.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/20">
-                <span className="text-[9px] text-white font-medium leading-tight px-0.5 text-center">{c.name}</span>
-              </div>
-              {isSelected && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-white text-sm drop-shadow">✓</span>
-                </div>
-              )}
-            </button>
-          )
-        })}
-      </div>
-      <button type="button" onClick={onToggleAll}
-        className="mt-3 text-xs text-accent font-medium hover:underline">
-        {showAll ? `Show fewer ▴` : `Show all ${total} colors ▾`}
-      </button>
-      <div className="mt-2 flex items-center gap-2">
-        <div className="w-5 h-5 rounded border border-border flex-shrink-0" style={{ background: selected.hex }} />
-        <span className="text-sm font-medium">{selected.name}</span>
-        <span className="text-xs text-muted-foreground">{selected.code}</span>
-      </div>
-    </div>
-  )
-}
-
 export default function OrderNewClient() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("photo")
@@ -262,6 +200,14 @@ export default function OrderNewClient() {
   const [guestEmail, setGuestEmail] = useState("")
   const [guestError, setGuestError] = useState<string | null>(null)
   const [guestSubmitting, setGuestSubmitting] = useState(false)
+  // Same modal also offers an inline login for returning customers, so a
+  // person with a real account doesn't get funneled into a second, orphaned
+  // anonymous account just because this browser has no session.
+  const [authModalMode, setAuthModalMode] = useState<"guest" | "login">("guest")
+  const [loginEmail, setLoginEmail] = useState("")
+  const [loginPassword, setLoginPassword] = useState("")
+  const [loginError, setLoginError] = useState<string | null>(null)
+  const [loginSubmitting, setLoginSubmitting] = useState(false)
   const logoColorCacheRef = useRef<{ url: string; color: string } | null>(null)
 
   // Sign spec fields
@@ -299,6 +245,12 @@ export default function OrderNewClient() {
   const [showAllColors, setShowAllColors] = useState(false)
   // Corner / wraparound sign
   const [isCorner, setIsCorner] = useState(false)
+  // The "Mark Sign Area" step is a small guided sequence rather than one long
+  // scrolling form: mark the area, then a focused size question, then (only
+  // if the client doesn't know their exact size) an explanation of the
+  // door/brick reference method and a screen to actually place it on the photo.
+  const [quadSubStep, setQuadSubStep] = useState<"area" | "sizeQuestion" | "explain" | "placement" | "mount">("area")
+  const [sizeQuestionAnswered, setSizeQuestionAnswered] = useState(false)
   // Client already knows the sign's exact size — skip photo-based measuring
   const [knownSize, setKnownSize] = useState(false)
   const [knownWidthInches, setKnownWidthInches] = useState<number>(0)
@@ -308,8 +260,6 @@ export default function OrderNewClient() {
   // Dura-Bond ACP colors (aluminum / no-light style)
   const [panelFaceColor, setPanelFaceColor] = useState<PanelColor>(DEFAULT_PANEL_FACE_COLOR)
   const [panelBgColor, setPanelBgColor] = useState<PanelColor>(DEFAULT_PANEL_BG_COLOR)
-  const [showAllPanelFace, setShowAllPanelFace] = useState(false)
-  const [showAllPanelBg, setShowAllPanelBg] = useState(false)
   // Backer panel behind the letters (channel-letter styles). Default ON — most
   // storefront walls aren't an attractive backdrop on their own.
   const [hasBackground, setHasBackground] = useState(true)
@@ -351,7 +301,15 @@ export default function OrderNewClient() {
   // Channel-letter styles (everything except the cabinet light-box and the awning)
   // can sit on a backer panel or mount directly to the wall.
   const isChannelLetter = !isAwning && computedReferenceId !== "light-box"
-  const lightingType = selectedReference.lightingType
+  // For lit channel letters, use the client's actual granular lightingStyle
+  // pick (front/back/front_back/front_side/back_side/full) — ReferenceStyle's
+  // own lightingType only distinguishes front/back/both and would collapse
+  // side-accent and full-surround into the same "both" prompt as plain
+  // front+back lighting. Other categories (light-box, awning, no-light) don't
+  // expose that picker, so they keep the reference style's default.
+  const lightingType = signCategory === "letters" && isLit === true
+    ? lightingStyle
+    : selectedReference.lightingType
   const illumination: IlluminationType = isAwning ? awningIllumination : mapping.illumination
   // Material is a CLIENT choice for every non-awning style (default = cheaper acrylic).
   const material: SignMaterial = isAwning ? "vinyl" : signMaterial
@@ -414,17 +372,26 @@ export default function OrderNewClient() {
     }
     setPrimaryColor(color)
 
-    // Find the nearest acrylic across ALL finishes (not filtered to current finish).
-    const bestAcrylic = nearestColor(color, ACRYLIC_COLORS)
-    // Threshold: squared RGB distance ~150 per channel on average = 67500.
-    // Below this the acrylic swatch is a credible brand-color match.
-    const ACRYLIC_THRESHOLD = 20000
-    if (colorDistance(color, bestAcrylic.hex) < ACRYLIC_THRESHOLD) {
-      setSignMaterial("acrylic")
-      setAcrylicColor(bestAcrylic)
-    } else {
+    // "No lighting" signs are always Dura-Bond aluminum (see the effect below that
+    // forces signMaterial back to aluminum whenever isLit is false) — decide that
+    // here instead of picking acrylic and letting the effect silently revert it,
+    // so panelFaceColor still ends up matching the logo color either way.
+    if (isLit === false) {
       setSignMaterial("aluminum")
       setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
+    } else {
+      // Find the nearest acrylic across ALL finishes (not filtered to current finish).
+      const bestAcrylic = nearestColor(color, ACRYLIC_COLORS)
+      // Threshold: squared RGB distance ~150 per channel on average = 67500.
+      // Below this the acrylic swatch is a credible brand-color match.
+      const ACRYLIC_THRESHOLD = 20000
+      if (colorDistance(color, bestAcrylic.hex) < ACRYLIC_THRESHOLD) {
+        setSignMaterial("acrylic")
+        setAcrylicColor(bestAcrylic)
+      } else {
+        setSignMaterial("aluminum")
+        setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
+      }
     }
 
     // Always show a background panel when a logo is present — user must choose color.
@@ -436,17 +403,11 @@ export default function OrderNewClient() {
     ? SUNBRELLA_COLORS
     : SUNBRELLA_COLORS.filter(c => c.common || c.code === awningFabric.code)
 
-  const visiblePanelFace = showAllPanelFace
-    ? DURABOND_COLORS
-    : DURABOND_COLORS.filter(c => c.common || c.code === panelFaceColor.code)
-
-  const visiblePanelBg = showAllPanelBg
-    ? DURABOND_COLORS
-    : DURABOND_COLORS.filter(c => c.common || c.code === panelBgColor.code)
-
   // The exact prompt we hand to the AI — assembled by the SAME builder the server
-  // uses, so what the client previews here is what actually gets sent.
-  const promptParams: SignPromptParams = {
+  // uses, so what the client previews here is what actually gets sent. Memoized so
+  // the sanitizing prompt builder doesn't rerun on every keystroke in unrelated
+  // fields (e.g. the Notes textarea) — only when a field it actually reads changes.
+  const promptParams: SignPromptParams = useMemo(() => ({
     businessName,
     brandMode,
     hasLogo: !!logoDataUrl,
@@ -475,16 +436,21 @@ export default function OrderNewClient() {
     isCorner,
     foldXPct: isCorner && quad && quad.length === 6 ? ((quad[1].x + quad[4].x) / 2) * 100 : undefined,
     customPrompt: customPrompt.trim() || undefined,
-  }
-  const assembledPrompt = buildSignPrompt(promptParams)
+  }), [
+    businessName, brandMode, logoDataUrl, computedReferenceId, signCategory, lightBoxType,
+    lightingType, isLit, fontStyle, primaryColor, colorSystem, panelFaceColor, isChannelLetter,
+    hasBackground, panelBgColor, acrylicColor, isAwning, awningFrame, awningFabric,
+    awningIllumination, isCorner, quad, customPrompt,
+  ])
+  const assembledPrompt = useMemo(() => buildSignPrompt(promptParams), [promptParams])
 
   // Pure client-side geometry — no AI call. Recomputes on any quad/reference
   // drag. Returns null if inputs are incomplete OR the reference line is too
   // short to trust (hard minimum gate) — never shown to the client, just
   // used to gate progression and to populate sign_spec on submit.
   const geometryResult = useMemo(
-    () => computeSignDimensions(quad, reference, referenceInches, imgDims),
-    [quad, reference, referenceInches, imgDims]
+    () => computeSignDimensions(quad, reference, referenceInches, imgDims, referenceType),
+    [quad, reference, referenceInches, imgDims, referenceType]
   )
   // Distinguishes "haven't marked both yet" from "marked, but line too short" —
   // drives the inline error copy in the quad step.
@@ -532,6 +498,29 @@ export default function OrderNewClient() {
       setGuestError(err instanceof Error ? err.message : "Could not proceed. Try again.")
     } finally {
       setGuestSubmitting(false)
+    }
+  }
+
+  // Returning customer signing into their real account from the same gate —
+  // inline, client-side, no redirect, so the in-progress photo/quad/sign-spec
+  // state survives and generation resumes immediately after auth.
+  async function handleInlineLogin() {
+    const email = loginEmail.trim()
+    const password = loginPassword
+    if (!email) { setLoginError("Please enter your email."); return }
+    if (!password) { setLoginError("Please enter your password."); return }
+    setLoginSubmitting(true)
+    setLoginError(null)
+    try {
+      const sb = createBrowserClient()
+      const { error } = await sb.auth.signInWithPassword({ email, password })
+      if (error) throw error
+      setShowGuestModal(false)
+      runPreview()
+    } catch (err) {
+      setLoginError(err instanceof Error ? err.message : "Could not log in. Try again.")
+    } finally {
+      setLoginSubmitting(false)
     }
   }
 
@@ -730,14 +719,18 @@ export default function OrderNewClient() {
             <div key={s} className="flex items-center gap-1">
               <button
                 onClick={() => goTo(s)}
+                style={active ? { backgroundImage: "var(--gradient-brand)" } : undefined}
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-colors
-                  ${active ? "bg-foreground text-background" : done ? "bg-accent/20 text-accent hover:bg-accent/30" : "text-muted-foreground cursor-default"}`}
+                  ${active ? "text-white" : done ? "bg-accent/20 text-accent hover:bg-accent/30" : "text-muted-foreground cursor-default"}`}
               >
-                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px]
-                  ${active ? "bg-background text-foreground" : done ? "bg-accent text-white" : "bg-muted"}`}>
+                <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] flex-shrink-0
+                  ${active ? "bg-white/25 text-white" : done ? "bg-accent text-white" : "bg-muted"}`}>
                   {done ? "✓" : i + 1}
                 </span>
-                {STEP_LABELS[s]}
+                {/* Full labels wrap the page into horizontal scroll on narrow phones —
+                    show them at sm+ only, except the active step, which keeps its
+                    label always visible so mobile users don't lose context. */}
+                <span className={active ? "" : "hidden sm:inline"}>{STEP_LABELS[s]}</span>
               </button>
               {i < STEPS.length - 1 && <div className="w-4 h-px bg-border" />}
             </div>
@@ -767,238 +760,307 @@ export default function OrderNewClient() {
       {/* ── Step 2: Quad selection + size estimate ── */}
       {step === "quad" && photoDataUrl && (
         <div className="space-y-6">
-          <div>
-            <h1 className="text-2xl font-bold">Mark where your sign will go</h1>
-            <p className="text-muted-foreground mt-1">Drag the corners of the gold box to outline the sign area — or drag anywhere inside it to move the whole box at once. This is how we measure your sign's size.</p>
-          </div>
+          {quadSubStep === "area" && (
+            <div>
+              <h1 className="text-2xl font-bold">Mark where your sign will go</h1>
+              <p className="text-muted-foreground mt-1">Drag the corners of the gold box to outline the sign area — or drag anywhere inside it to move the whole box at once.</p>
+            </div>
+          )}
 
           {/* Corner toggle — hidden when perpendicular (blade signs can't wrap a corner).
-              Comes first: it changes the quad's shape (4 vs 6 points), so it must be
-              decided before the area-marking canvas below. */}
-          {!isPerpendicular && (
-          <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-            <input
-              type="checkbox"
-              checked={isCorner}
-              onChange={e => {
-                setIsCorner(e.target.checked)
-                setQuad(null)
-              }}
-              className="w-4 h-4 accent-accent"
-            />
-            <div>
-              <p className="text-sm font-medium leading-tight">Corner sign (wraps two walls)</p>
-              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Use this if your sign bends around the building corner, covering both the front and side face.</p>
-            </div>
-          </label>
-          )}
-
-          <QuadSelector
-            imageDataUrl={photoDataUrl}
-            corner={isCorner}
-            onChange={(q) => setQuad(q)}
-            onReferenceChange={(r) => setReference(r)}
-            onImageLoad={(w, h) => setImgDims({ w, h })}
-            referenceLabel={(() => {
-              const preset = REFERENCE_PRESETS.find(r => r.id === referenceType)
-              if (!preset || preset.inches === null) return "Reference"
-              // Strip any parenthetical (e.g. '(80")') from the label
-              return preset.label.replace(/\s*\(.*?\)\s*$/, "").trim()
-            })()}
-            referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
-            showReference={!knownSize}
-          />
-
-          {signDimensions && (
-            <p className="text-sm text-green-700 flex items-center gap-1.5">
-              <span>✓</span> Sign area marked
-            </p>
-          )}
-
-          {!knownSize && referenceTooShort && (
-            <p className="text-sm text-red-600">
-              {referenceType === "door"
-                ? "The door outline is too small to measure from — stretch it to match the full height of the door."
-                : referenceType === "brick"
-                ? "The brick outline is too small to measure from — stretch it to span a full row of bricks."
-                : "The measurement line is too short — drag the ends further apart so we can calculate the scale."}
-            </p>
-          )}
-
-          <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
-            <input
-              type="checkbox"
-              checked={knownSize}
-              onChange={e => setKnownSize(e.target.checked)}
-              className="w-4 h-4 accent-accent"
-            />
-            <div>
-              <p className="text-sm font-medium leading-tight">I already know my sign's exact size</p>
-              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Skip measuring from the photo and type the dimensions yourself.</p>
-            </div>
-          </label>
-
-          {/* Reference-object preset — how we measure the sign from the photo */}
-          {!knownSize && (
-          <div>
-            <label className="block text-sm font-medium mb-1">How we measure your sign</label>
-            <p className="text-xs text-muted-foreground mb-2">
-              {referenceType === "door"
-                ? "Place the door outline over a real door in your photo. Drag it anywhere to move it, or drag the dot at the bottom to match the door's height. A standard door is 80\" tall, so we use that to calculate your sign's exact size."
-                : referenceType === "brick"
-                ? "Place the brick outline over one full row of bricks on the wall. Drag it anywhere to move it, or drag the dot at the bottom to match the row's height. A standard brick row is 8\" tall — that gives us the scale we need."
-                : "Mark any object in the photo whose real size you know, then type its length below. We'll use that to work out your sign's size."}
-            </p>
-            <select
-              value={referenceType}
-              onChange={e => {
-                const id = e.target.value
-                setReferenceType(id)
-                const preset = REFERENCE_PRESETS.find(r => r.id === id)
-                if (preset?.inches != null) setReferenceInches(preset.inches)
-              }}
-              className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-            >
-              {REFERENCE_PRESETS.map(r => (
-                <option key={r.id} value={r.id}>{r.label}</option>
-              ))}
-            </select>
-            {referenceType === "custom" && (
+              Only relevant while marking the area, but stays mounted (just visually
+              hidden) the rest of this step so its own state never resets. */}
+          <div className={quadSubStep === "area" && !isPerpendicular ? "" : "hidden"}>
+            <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
               <input
-                type="number"
-                inputMode="decimal"
-                min={1}
-                value={referenceInches}
-                onChange={e => setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                placeholder="Length in inches (e.g. 36)"
-                className="mt-2 w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                type="checkbox"
+                checked={isCorner}
+                onChange={e => {
+                  setIsCorner(e.target.checked)
+                  setQuad(null)
+                }}
+                className="w-4 h-4 accent-accent"
               />
-            )}
-          </div>
-          )}
-
-          {/* Manual dimensions — client already knows their sign's exact size */}
-          {knownSize && (
-          <div>
-            <label className="block text-sm font-medium mb-1">Your sign's dimensions</label>
-            <p className="text-xs text-muted-foreground mb-2">We'll use these exact numbers instead of estimating from the photo.</p>
-            {isCorner ? (
-              <>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Front width (inches)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      value={knownFrontWidthInches || ""}
-                      onChange={e => setKnownFrontWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                      placeholder="e.g. 60"
-                      className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium mb-1">Side width (inches)</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      min={0}
-                      value={knownSideWidthInches || ""}
-                      onChange={e => setKnownSideWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                      placeholder="e.g. 36"
-                      className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                    />
-                  </div>
-                </div>
-                <div className="mt-3">
-                  <label className="block text-xs font-medium mb-1">Height (inches)</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    value={knownHeightInches || ""}
-                    onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                    placeholder="e.g. 24"
-                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-medium mb-1">Width (inches)</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    value={knownWidthInches || ""}
-                    onChange={e => setKnownWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                    placeholder="e.g. 60"
-                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium mb-1">Height (inches)</label>
-                  <input
-                    type="number"
-                    inputMode="decimal"
-                    min={0}
-                    value={knownHeightInches || ""}
-                    onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                    placeholder="e.g. 24"
-                    className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                  />
-                </div>
+              <div>
+                <p className="text-sm font-medium leading-tight">Corner sign (wraps two walls)</p>
+                <p className="text-xs text-muted-foreground leading-tight mt-0.5">Use this if your sign bends around the building corner, covering both the front and side face.</p>
               </div>
+            </label>
+          </div>
+
+          {/* QuadSelector stays mounted for the whole step (never conditionally
+              unmounted) so its internal quad/reference drag state survives moving
+              between sub-steps — only its visibility toggles. It's needed again on
+              the "placement" screen, after the size/reference questions below. */}
+          <div className={quadSubStep === "area" || quadSubStep === "placement" ? "" : "hidden"}>
+            <QuadSelector
+              imageDataUrl={photoDataUrl}
+              corner={isCorner}
+              onChange={(q) => setQuad(q)}
+              onReferenceChange={(r) => setReference(r)}
+              onImageLoad={(w, h) => setImgDims({ w, h })}
+              referenceLabel={(() => {
+                const preset = REFERENCE_PRESETS.find(r => r.id === referenceType)
+                if (!preset || preset.inches === null) return "Reference"
+                // Strip any parenthetical (e.g. '(80")') from the label
+                return preset.label.replace(/\s*\(.*?\)\s*$/, "").trim()
+              })()}
+              referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
+              showReference={quadSubStep === "placement"}
+              caption={quadSubStep === "placement" ? (
+                referenceType === "door" ? "Drag anywhere to move the door, or drag a corner to match its exact shape and height."
+                : referenceType === "brick" ? "Drag anywhere to move the outline, or drag a corner to match the brick row's exact shape and height."
+                : "Drag anywhere to move it, or drag a corner to match your reference object's exact shape and size."
+              ) : undefined}
+            />
+            {quadSubStep === "placement" && referenceTooShort && (
+              <p className="text-sm text-red-600 mt-2">
+                {referenceType === "door"
+                  ? "The door outline is too small to measure from — stretch it to match the full height of the door."
+                  : referenceType === "brick"
+                  ? "The brick outline is too small to measure from — stretch it to span a full row of bricks."
+                  : "The measurement line is too short — drag the ends further apart so we can calculate the scale."}
+              </p>
             )}
-            {knownSize && !manualDimensionsValid && (
-              <p className="text-xs text-red-600 mt-2">
-                {isCorner
-                  ? "Enter the front width, side width, and height to continue."
-                  : "Enter the width and height to continue."}
+            {quadSubStep === "placement" && geometryResult && (
+              <p className="text-sm text-green-700 flex items-center gap-1.5 mt-2">
+                <span>✓</span> Lined up — we can calculate your sign's size
               </p>
             )}
           </div>
+
+          {quadSubStep === "sizeQuestion" && (
+            <div className="space-y-4">
+              <div>
+                <h1 className="text-2xl font-bold">Do you know your sign's exact size?</h1>
+                <p className="text-muted-foreground mt-1">If not, we'll walk you through measuring it from your photo — no tape measure needed.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => { setKnownSize(true); setSizeQuestionAnswered(true) }}
+                  className={`text-left rounded-xl border-2 p-4 transition-all ${
+                    sizeQuestionAnswered && knownSize ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">Yes, I know it</span>
+                  <span className="block text-xs text-muted-foreground mt-1">I'll type the width and height.</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { setKnownSize(false); setSizeQuestionAnswered(true) }}
+                  className={`text-left rounded-xl border-2 p-4 transition-all ${
+                    sizeQuestionAnswered && !knownSize ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">No, help me measure</span>
+                  <span className="block text-xs text-muted-foreground mt-1">We'll use something in your photo to figure it out.</span>
+                </button>
+              </div>
+
+              {sizeQuestionAnswered && knownSize && (
+                <div>
+                  <label className="block text-sm font-medium mb-1">Your sign's dimensions</label>
+                  <p className="text-xs text-muted-foreground mb-2">We'll use these exact numbers instead of estimating from the photo.</p>
+                  {isCorner ? (
+                    <>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Front width (inches)</label>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            value={knownFrontWidthInches || ""}
+                            onChange={e => setKnownFrontWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                            placeholder="e.g. 60"
+                            className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium mb-1">Side width (inches)</label>
+                          <input
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            value={knownSideWidthInches || ""}
+                            onChange={e => setKnownSideWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                            placeholder="e.g. 36"
+                            className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <label className="block text-xs font-medium mb-1">Height (inches)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          value={knownHeightInches || ""}
+                          onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                          placeholder="e.g. 24"
+                          className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                        />
+                      </div>
+                    </>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Width (inches)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          value={knownWidthInches || ""}
+                          onChange={e => setKnownWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                          placeholder="e.g. 60"
+                          className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium mb-1">Height (inches)</label>
+                        <input
+                          type="number"
+                          inputMode="decimal"
+                          min={0}
+                          value={knownHeightInches || ""}
+                          onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                          placeholder="e.g. 24"
+                          className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                        />
+                      </div>
+                    </div>
+                  )}
+                  {!manualDimensionsValid && (
+                    <p className="text-xs text-red-600 mt-2">
+                      {isCorner
+                        ? "Enter the front width, side width, and height to continue."
+                        : "Enter the width and height to continue."}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
           )}
 
-          {/* Mount type question — last: decided after the area is marked and sized */}
-          <div>
-            <p className="text-sm font-medium mb-0.5">How will the sign mount?</p>
-            <p className="text-xs text-muted-foreground mb-2">Flat signs sit against the wall. Blade signs stick out over the sidewalk so people see them walking along the street.</p>
-            <div className="grid grid-cols-2 gap-2">
-              <PictureChoice
-                label="Flat on the wall"
-                description="Faces the street, sits flush"
-                imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg"
-                selected={!isPerpendicular}
-                onClick={() => setIsPerpendicular(false)}
-              />
-              <PictureChoice
-                label="Perpendicular (blade)"
-                description="Sticks out from the wall on a bracket"
-                imageSrc="/examples/lightbox-mount/perpendicular.jpg"
-                selected={isPerpendicular}
-                onClick={() => {
-                  setIsPerpendicular(true)
-                  if (isCorner) {
-                    setIsCorner(false)
-                    setQuad(null)
-                  }
-                }}
-              />
+          {quadSubStep === "explain" && (
+            <div className="space-y-4">
+              <div>
+                <h1 className="text-2xl font-bold">Here's how we'll measure it</h1>
+                <p className="text-muted-foreground mt-1">
+                  We compare your sign area to something in the photo whose real size we already know — like a standard door (80" tall) or a single row of bricks (8" tall). That gives us a scale to convert your sign's size to exact inches, no special equipment needed.
+                </p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-2">Is a door or brick wall visible in your photo?</label>
+                <div className="grid grid-cols-1 gap-2">
+                  {REFERENCE_PRESETS.map(r => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => {
+                        setReferenceType(r.id)
+                        if (r.inches != null) setReferenceInches(r.inches)
+                      }}
+                      className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
+                        referenceType === r.id ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                      }`}
+                    >
+                      <span className="block text-sm font-semibold">
+                        {r.id === "door" ? "Yes, a door" : r.id === "brick" ? "Yes, a brick wall" : "Neither — I'll mark something else"}
+                      </span>
+                      <span className="block text-xs text-muted-foreground mt-0.5">{r.label}</span>
+                    </button>
+                  ))}
+                </div>
+                {referenceType === "custom" && (
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min={1}
+                    value={referenceInches}
+                    onChange={e => setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)}
+                    placeholder="Length in inches (e.g. 36)"
+                    className="mt-2 w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                  />
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {quadSubStep === "placement" && (
+            <div>
+              <h1 className="text-2xl font-bold">
+                {referenceType === "door" ? "Place the door outline" : referenceType === "brick" ? "Place the brick outline" : "Mark your reference object"}
+              </h1>
+              <p className="text-muted-foreground mt-1">
+                {referenceType === "door"
+                  ? "Line it up with a real door in your photo. Drag it anywhere to move it, or drag a corner to match the door's exact shape and height."
+                  : referenceType === "brick"
+                  ? "Line it up with one full row of bricks. Drag it anywhere to move it, or drag a corner to match the row's exact shape and height."
+                  : "Mark any object in the photo whose real size you know — you already told us its length."}
+              </p>
+            </div>
+          )}
+
+          {quadSubStep === "mount" && (
+            <div>
+              <p className="text-sm font-medium mb-0.5">How will the sign mount?</p>
+              <p className="text-xs text-muted-foreground mb-2">Flat signs sit against the wall. Blade signs stick out over the sidewalk so people see them walking along the street.</p>
+              <div className="grid grid-cols-2 gap-2">
+                <PictureChoice
+                  label="Flat on the wall"
+                  description="Faces the street, sits flush"
+                  imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg"
+                  selected={!isPerpendicular}
+                  onClick={() => setIsPerpendicular(false)}
+                />
+                <PictureChoice
+                  label="Perpendicular (blade)"
+                  description="Sticks out from the wall on a bracket"
+                  imageSrc="/examples/lightbox-mount/perpendicular.jpg"
+                  selected={isPerpendicular}
+                  onClick={() => {
+                    setIsPerpendicular(true)
+                    if (isCorner) {
+                      setIsCorner(false)
+                      setQuad(null)
+                    }
+                  }}
+                />
+              </div>
+            </div>
+          )}
 
           <div className="flex gap-3">
-            <button onClick={() => setStep("photo")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
+            <button
+              onClick={() => {
+                if (quadSubStep === "area") setStep("photo")
+                else if (quadSubStep === "sizeQuestion") setQuadSubStep("area")
+                else if (quadSubStep === "explain") setQuadSubStep("sizeQuestion")
+                else if (quadSubStep === "placement") setQuadSubStep("explain")
+                else setQuadSubStep(knownSize ? "sizeQuestion" : "placement")
+              }}
+              className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50"
+            >
               ← Back
             </button>
             <button
-              onClick={() => setStep("customize")}
-              disabled={!signDimensions}
+              onClick={() => {
+                if (quadSubStep === "area") setQuadSubStep("sizeQuestion")
+                else if (quadSubStep === "sizeQuestion") setQuadSubStep(knownSize ? "mount" : "explain")
+                else if (quadSubStep === "explain") setQuadSubStep("placement")
+                else if (quadSubStep === "placement") setQuadSubStep("mount")
+                else setStep("customize")
+              }}
+              disabled={
+                (quadSubStep === "sizeQuestion" && (!sizeQuestionAnswered || (knownSize && !manualDimensionsValid))) ||
+                (quadSubStep === "placement" && !geometryResult) ||
+                (quadSubStep === "mount" && !signDimensions)
+              }
               className="flex-2 flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
-              Continue → Sign Details
+              {quadSubStep === "mount" ? "Continue → Sign Details" : "Continue"}
             </button>
           </div>
         </div>
@@ -1021,7 +1083,9 @@ export default function OrderNewClient() {
                 <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={logoDataUrl} alt="Logo" className="h-10 w-auto object-contain rounded" />
-                  <span className="flex-1 text-sm text-foreground font-medium">Logo uploaded</span>
+                  <span className="flex-1 text-sm text-foreground font-medium">
+                    {logoAnalyzing ? "Analyzing logo…" : "Logo uploaded"}
+                  </span>
                   <button
                     type="button"
                     onClick={() => {
@@ -1504,7 +1568,7 @@ export default function OrderNewClient() {
                 <div>
                   <label className="block text-sm font-medium mb-2">Fabric color (Sunbrella)</label>
                   <div className="grid grid-cols-6 gap-2">
-                    {SUNBRELLA_COLORS.filter(c => c.common).map(c => (
+                    {visibleColors.map(c => (
                       <button
                         key={c.code}
                         type="button"
@@ -1517,6 +1581,13 @@ export default function OrderNewClient() {
                       />
                     ))}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAllColors(v => !v)}
+                    className="mt-2 text-xs text-accent font-medium hover:underline"
+                  >
+                    {showAllColors ? "Show fewer ▴" : `Show all ${SUNBRELLA_COLORS.length} colors ▾`}
+                  </button>
                 </div>
 
                 <details className="border border-border rounded-xl overflow-hidden group">
@@ -1697,7 +1768,13 @@ export default function OrderNewClient() {
                 ← Back
               </button>
               <button
-                onClick={() => setStep("review")}
+                onClick={() => {
+                  // A client can continue past a failed/empty preview without
+                  // retrying — flag it so the review step shows the reassuring
+                  // "no preview, but quotes still work" message instead of nothing.
+                  if (previewOptions.length === 0) setPreviewSkipped(true)
+                  setStep("review")
+                }}
                 className="flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
               >
                 Continue → Review your order
@@ -1926,61 +2003,127 @@ export default function OrderNewClient() {
         </div>
       )}
 
-      {/* ── Guest capture modal ── */}
+      {/* ── Guest capture / inline login modal ── */}
       {showGuestModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4">
           <div className="bg-background border border-border rounded-2xl p-6 w-full max-w-sm shadow-xl">
-            <h2 className="text-lg font-bold mb-1">One quick step</h2>
-            <p className="text-sm text-muted-foreground mb-5">
-              We need your contact details so sign companies can send you quotes.
-            </p>
-            <div className="space-y-3">
-              <div>
-                <label className="block text-sm font-medium mb-1">Your name</label>
-                <input
-                  type="text"
-                  value={guestName}
-                  onChange={e => setGuestName(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
-                  placeholder="Jane Smith"
-                  autoFocus
-                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Email <span className="text-muted-foreground font-normal">(optional)</span></label>
-                <input
-                  type="email"
-                  value={guestEmail}
-                  onChange={e => setGuestEmail(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
-                  placeholder="jane@example.com"
-                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium mb-1">Phone number</label>
-                <input
-                  type="tel"
-                  value={guestPhone}
-                  onChange={e => setGuestPhone(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
-                  placeholder="(555) 123-4567"
-                  className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
-                />
-              </div>
-              {guestError && <p className="text-sm text-red-600">{guestError}</p>}
-              <button
-                onClick={handleGuestSubmit}
-                disabled={guestSubmitting}
-                className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
-              >
-                {guestSubmitting ? "Setting up…" : "Generate my preview"}
-              </button>
-              <p className="text-xs text-center text-muted-foreground">
-                By continuing you agree to receive sign quotes at the number above.
-              </p>
-            </div>
+            {authModalMode === "guest" ? (
+              <>
+                <h2 className="text-lg font-bold mb-1">One quick step</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  We need your contact details so sign companies can send you quotes.
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Your name</label>
+                    <input
+                      type="text"
+                      value={guestName}
+                      onChange={e => setGuestName(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                      placeholder="Jane Smith"
+                      autoFocus
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Email <span className="text-muted-foreground font-normal">(optional)</span></label>
+                    <input
+                      type="email"
+                      value={guestEmail}
+                      onChange={e => setGuestEmail(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                      placeholder="jane@example.com"
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Phone number</label>
+                    <input
+                      type="tel"
+                      value={guestPhone}
+                      onChange={e => setGuestPhone(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
+                      placeholder="(555) 123-4567"
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  {guestError && <p className="text-sm text-red-600">{guestError}</p>}
+                  <button
+                    onClick={handleGuestSubmit}
+                    disabled={guestSubmitting}
+                    className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {guestSubmitting ? "Setting up…" : "Generate my preview"}
+                  </button>
+                  <p className="text-xs text-center text-muted-foreground">
+                    By continuing you agree to receive sign quotes at the number above.
+                  </p>
+                  <p className="text-sm text-center text-muted-foreground pt-1">
+                    Already have an account?{" "}
+                    <button
+                      type="button"
+                      onClick={() => { setAuthModalMode("login"); setGuestError(null) }}
+                      className="text-accent font-medium hover:underline"
+                    >
+                      Log in
+                    </button>
+                  </p>
+                </div>
+              </>
+            ) : (
+              <>
+                <h2 className="text-lg font-bold mb-1">Welcome back</h2>
+                <p className="text-sm text-muted-foreground mb-5">
+                  Log in to continue generating your preview.
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Email</label>
+                    <input
+                      type="email"
+                      value={loginEmail}
+                      onChange={e => setLoginEmail(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleInlineLogin()}
+                      placeholder="jane@example.com"
+                      autoFocus
+                      autoComplete="email"
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium mb-1">Password</label>
+                    <input
+                      type="password"
+                      value={loginPassword}
+                      onChange={e => setLoginPassword(e.target.value)}
+                      onKeyDown={e => e.key === "Enter" && handleInlineLogin()}
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+                  <button
+                    onClick={handleInlineLogin}
+                    disabled={loginSubmitting}
+                    className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                  >
+                    {loginSubmitting ? "Logging in…" : "Log in & generate my preview"}
+                  </button>
+                  <p className="text-sm text-center text-muted-foreground pt-1">
+                    New here?{" "}
+                    <button
+                      type="button"
+                      onClick={() => { setAuthModalMode("guest"); setLoginError(null) }}
+                      className="text-accent font-medium hover:underline"
+                    >
+                      Continue as guest
+                    </button>
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}

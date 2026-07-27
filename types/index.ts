@@ -101,7 +101,7 @@ export interface SignSpec {
   // Reference-line calibration ("app ruler") the client marked to compute size
   reference_type?: string             // e.g. "door" | "window" | "brick" | "custom"
   reference_inches?: number           // known real-world length of the reference line
-  reference_line?: { x: number; y: number }[]  // 2 normalized points [A,B]
+  reference_line?: { x: number; y: number }[]  // 2 points [A,B] (ruler mode) or 4 points [TL,TR,BR,BL] (door/brick sticker mode)
   // Corner / wraparound sign fields
   is_corner?: boolean
   front_width_inches?: number  // face 1 width (corner signs only)
@@ -272,21 +272,3 @@ export interface CommissionLogEntry {
   note: string | null
 }
 
-// ─── AI ──────────────────────────────────────────────────────────────────────
-
-export interface SignSizeResult {
-  width_inches: number
-  height_inches: number
-  confidence: "high" | "medium" | "low"
-  method: "multi-reference" | "door-only" | "fallback"
-  references_used: string[]
-  angle_warning: boolean
-  reasoning: string
-}
-
-export interface SelectionQuad {
-  topLeft: { x: number; y: number }
-  topRight: { x: number; y: number }
-  bottomRight: { x: number; y: number }
-  bottomLeft: { x: number; y: number }
-}

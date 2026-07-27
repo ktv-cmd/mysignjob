@@ -19,7 +19,7 @@ export async function submitBid(_prev: { error?: string } | null, formData: Form
   const orderId = formData.get("order_id") as string
   const priceDollars = parseFloat(formData.get("price_dollars") as string)
   const timelineDays = parseInt(formData.get("timeline_days") as string)
-  const notes = (formData.get("notes") as string).trim()
+  const notes = String(formData.get("notes") ?? "").trim()
 
   if (!orderId || isNaN(priceDollars) || priceDollars <= 0)
     return { error: "Please enter a valid price." }
@@ -53,7 +53,10 @@ export async function submitBid(_prev: { error?: string } | null, formData: Form
     { onConflict: "order_id,sc_id" }
   )
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error("[submitBid] failed to save bid", error)
+    return { error: "Something went wrong submitting your bid. Please try again." }
+  }
 
   // Flip order to 'bidding' if still 'submitted'
   await supabase

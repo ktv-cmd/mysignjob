@@ -1,19 +1,23 @@
 // Pure client-side sign-size geometry — the "app ruler" pattern.
 //
-// The client marks a 2-point reference line on a known object (door, window,
-// brick course, or a custom-length object) in the same photo as the sign
-// quad. Because both the quad and the reference line live in the same
-// normalized image space, we can convert the quad's pixel dimensions to
-// real-world inches using the reference line's known length — no AI call,
-// no depth model.
+// The client marks a reference on a known object (door, window, brick
+// course, or a custom-length object) in the same photo as the sign quad —
+// either a straight 2-point A→B line (ruler mode, arbitrary custom object)
+// or a 4-point [TL,TR,BR,BL] quad (door/brick sticker mode), the same
+// convention as the sign quad itself, so a reference photographed at an
+// angle is measured the same way an angled sign quad already is (its own
+// left/right edge lengths averaged, not a single straight-line distance).
+// Because both the quad and the reference live in the same normalized image
+// space, we can convert the quad's pixel dimensions to real-world inches
+// using the reference's known length — no AI call, no depth model.
 //
-// Known v1 limitation: the angle-divergence heuristic below catches
-// quad-shape distortion (the quad itself being non-rectangular in the photo)
-// but does NOT detect a reference line marked in a differently-foreshortened
+// Known v1 limitation: the angle-divergence heuristic below now catches both
+// the sign quad's own distortion AND a 4-point reference's own distortion,
+// but still does NOT detect a reference marked in a differently-foreshortened
 // region of the same photo than the sign quad (e.g. reference on a wall
-// facing the camera, sign quad on a wall angled away). We mitigate this with
-// UI copy asking the client to pick a reference object near the sign, not
-// with additional math.
+// facing the camera, sign quad on a wall angled away) — that mismatch is
+// mitigated with UI copy asking the client to pick a reference near the
+// sign, not with additional math.
 
 export type GeoPoint = { x: number; y: number } // normalized 0–1
 export type ImgDims = { w: number; h: number }
@@ -57,13 +61,31 @@ export function computeSignDimensions(
   quad: GeoPoint[] | null,
   reference: GeoPoint[] | null,
   referenceInches: number,
-  imgDims: ImgDims | null
+  imgDims: ImgDims | null,
+  referenceType?: string
 ): SignDimensions | null {
-  if (!quad || !reference || reference.length !== 2 || !imgDims) return null
+  if (!quad || !reference || !imgDims) return null
+  if (!(reference.length === 2 || reference.length === 4)) return null
   if (!(quad.length === 4 || quad.length === 6)) return null
   if (!referenceInches || referenceInches <= 0) return null
 
-  const refPx = dist(reference[0], reference[1], imgDims)
+  // Ruler mode: a straight 2-point A→B measurement. Door/brick sticker mode:
+  // a 4-point [TL,TR,BR,BL] quad, same convention as the sign quad itself —
+  // average the left/right edge lengths instead of a single straight-line
+  // distance, so a reference photographed at an angle is handled the same
+  // way an angled sign quad already is (closing part of the "known v1
+  // limitation" noted above, where only the sign quad's own angle was caught).
+  let refPx: number
+  let refAngleWarning = false
+  if (reference.length === 2) {
+    refPx = dist(reference[0], reference[1], imgDims)
+  } else {
+    const [refTl, refTr, refBr, refBl] = reference
+    const leftPx = dist(refTl, refBl, imgDims)
+    const rightPx = dist(refTr, refBr, imgDims)
+    refPx = (leftPx + rightPx) / 2
+    refAngleWarning = edgesDiverge(leftPx, rightPx)
+  }
   if (refPx < MIN_REFERENCE_PX) return null // too short to trust — caller shows inline error
 
   const pixelsPerInch = refPx / referenceInches
@@ -81,9 +103,9 @@ export function computeSignDimensions(
 
     const frontWidthPx = (dist(tl, tm, imgDims) + dist(bl, bm, imgDims)) / 2
     const sideWidthPx = (dist(tm, tr, imgDims) + dist(bm, br, imgDims)) / 2
-    const frontHeightPx = (dist(tl, bl, imgDims) + dist(tm, bm, imgDims)) / 2
-    const sideHeightPx = (dist(tm, bm, imgDims) + dist(tr, br, imgDims)) / 2
-    const heightPx = (frontHeightPx + sideHeightPx) / 2
+    // Average all three measured columns equally — the fold column (tm/bm) must not
+    // be double-counted by averaging it into both a "front" and "side" height first.
+    const heightPx = (dist(tl, bl, imgDims) + dist(tm, bm, imgDims) + dist(tr, br, imgDims)) / 3
 
     frontWidthInches = frontWidthPx / pixelsPerInch
     sideWidthInches = sideWidthPx / pixelsPerInch
@@ -112,6 +134,7 @@ export function computeSignDimensions(
 
     angleWarning = edgesDiverge(topPx, bottomPx) || edgesDiverge(leftPx, rightPx)
   }
+  angleWarning = angleWarning || refAngleWarning
 
   const confidence: "high" | "medium" | "low" =
     refPx > HIGH_CONFIDENCE_REFERENCE_PX && !angleWarning
@@ -130,7 +153,7 @@ export function computeSignDimensions(
     isCorner,
     confidence,
     angleWarning,
-    referencesUsed: [],
+    referencesUsed: referenceType ? [referenceType] : [],
   }
 }
 

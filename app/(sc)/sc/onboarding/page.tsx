@@ -5,7 +5,7 @@ import { signSCAgreement } from "@/app/actions/sc-onboarding"
 export default async function SCOnboardingAgreementPage() {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
-  if (!user) redirect("/login")
+  if (!user) redirect("/login?next=/sc/onboarding")
 
   const { data: sc } = await supabase
     .from("sc_companies")
@@ -33,10 +33,10 @@ export default async function SCOnboardingAgreementPage() {
       </div>
 
       <div className="border border-border rounded-xl p-6 max-h-72 overflow-y-auto text-sm leading-relaxed space-y-4 bg-muted/20">
-        <p className="font-semibold">My Sign Job — Sign Company Partner Agreement</p>
+        <p className="font-semibold">Mysignjobs.com — Sign Company Partner Agreement</p>
         <p>
           By accepting this agreement, your company ("Sign Company") agrees to be bound by the
-          terms of the My Sign Job platform. This is a placeholder; final legal text will replace
+          terms of the Mysignjobs.com platform. This is a placeholder; final legal text will replace
           this before launch.
         </p>
         <p>
@@ -46,7 +46,7 @@ export default async function SCOnboardingAgreementPage() {
         </p>
         <p>
           <strong>Payments.</strong> Sign Company will receive payment via Stripe Connect transfer.
-          Payout schedule: 25% at job kickoff, 62.5% on client final approval. My Sign Job retains
+          Payout schedule: 25% at job kickoff, 62.5% on client final approval. Mysignjobs.com retains
           a 12.5% platform commission from each job.
         </p>
         <p>
@@ -56,7 +56,7 @@ export default async function SCOnboardingAgreementPage() {
         </p>
         <p>
           <strong>Conduct.</strong> Sign Company agrees not to solicit clients off-platform for
-          jobs introduced via My Sign Job. Disputes are resolved via the platform dispute process.
+          jobs introduced via Mysignjobs.com. Disputes are resolved via the platform dispute process.
         </p>
       </div>
 

@@ -80,7 +80,10 @@ export async function POST(req: NextRequest) {
     const { error: photoErr } = await supabase.storage
       .from("documents")
       .upload(photoPath, photoBuffer, { contentType: "image/jpeg", upsert: true })
-    if (photoErr) return NextResponse.json({ error: `Photo upload failed: ${photoErr.message}` }, { status: 500 })
+    if (photoErr) {
+      console.error("[preview/start] photo upload failed", photoErr)
+      return NextResponse.json({ error: "Could not upload your photo. Please try again." }, { status: 500 })
+    }
 
     // Upload the logo if present. MIME type and size were already validated above.
     let logoPath: string | undefined
@@ -88,12 +91,17 @@ export async function POST(req: NextRequest) {
       // Already validated above (ALLOWED_MIME check), so the match is guaranteed here.
       const logoMime = logoDataUrl.match(/^data:([^;]+);base64,/)?.[1] ?? "image/jpeg"
       const ext = logoMime === "image/png" ? "png" : logoMime === "image/webp" ? "webp" : "jpg"
-      logoPath = `preview-inputs/${user.id}/${jobId}-logo.${ext}`
+      const candidateLogoPath = `preview-inputs/${user.id}/${jobId}-logo.${ext}`
       const logoBuffer = Buffer.from(logoDataUrl.split(",")[1]!, "base64")
-      await supabase.storage.from("documents").upload(logoPath, logoBuffer, {
+      const { error: logoErr } = await supabase.storage.from("documents").upload(candidateLogoPath, logoBuffer, {
         contentType: logoMime,
         upsert: true,
       })
+      if (logoErr) {
+        console.error("[preview/start] logo upload failed — preview will proceed without a logo", logoErr)
+      } else {
+        logoPath = candidateLogoPath
+      }
     }
 
     // Persist only the small generation params + storage paths (no base64).
@@ -127,7 +135,10 @@ export async function POST(req: NextRequest) {
       status: "pending",
       params,
     })
-    if (insertErr) return NextResponse.json({ error: `Could not create job: ${insertErr.message}` }, { status: 500 })
+    if (insertErr) {
+      console.error("[preview/start] failed to create preview_jobs row", insertErr)
+      return NextResponse.json({ error: "Could not start your preview. Please try again." }, { status: 500 })
+    }
 
     // Trigger the worker. On Netlify use a background function (15-min limit); the
     // POST returns 202 quickly so we can await it. Locally, fire-and-forget into a

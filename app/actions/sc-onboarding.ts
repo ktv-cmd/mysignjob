@@ -4,6 +4,40 @@ import { createClient } from "@/lib/supabase/server"
 import { headers } from "next/headers"
 import { redirect } from "next/navigation"
 import { stripe } from "@/lib/stripe/server"
+import type { SupabaseClient } from "@supabase/supabase-js"
+
+// Shared gate check used both by the client-triggered poll below (checkAndActivateSC)
+// and by the Stripe webhook (account.updated), so an SC can go active purely from
+// the webhook firing — not just when the user happens to be back in the app polling.
+// Takes the sc_companies row's known gate fields directly so callers can pass
+// either a freshly-fetched row (client path) or the webhook's own lookup.
+export async function activateSCIfEligible(
+  supabase: SupabaseClient,
+  sc: {
+    id: string
+    status: string
+    agreement_signed_at: string | null
+    insurance_verified: boolean
+    insurance_reviewed_at: string | null
+    stripe_onboarding_complete: boolean
+  }
+): Promise<{ status: string; missing: string[] }> {
+  const missing: string[] = []
+
+  if (!sc.agreement_signed_at) missing.push("agreement")
+  if (!sc.insurance_verified) missing.push("insurance")
+  // insurance_verified only means the AI-extracted certificate passed rule checks —
+  // an admin still has to confirm the extraction before the SC can go live.
+  if (sc.insurance_verified && !sc.insurance_reviewed_at) missing.push("admin_review")
+  if (!sc.stripe_onboarding_complete) missing.push("stripe")
+
+  if (missing.length === 0 && sc.status !== "active") {
+    await supabase.from("sc_companies").update({ status: "active" }).eq("id", sc.id)
+    return { status: "active", missing: [] }
+  }
+
+  return { status: sc.status, missing }
+}
 
 // ─── Step 1: Sign SC agreement ───────────────────────────────────────────────
 
@@ -45,6 +79,10 @@ export async function saveBusinessInfo(
   if (ein.length !== 9) return { error: "EIN must be 9 digits (e.g. 12-3456789)." }
   if (!address_line1 || !city || !state || !zip)
     return { error: "Please fill in all address fields." }
+  // City feeds a jurisdiction lookup key elsewhere — keep it to characters a
+  // real city name can contain so that key can never smuggle query syntax.
+  if (!/^[a-zA-Z\s\-'.]+$/.test(city))
+    return { error: "City can only contain letters, spaces, and hyphens." }
   if (isNaN(service_radius_miles) || service_radius_miles < 1 || service_radius_miles > 500)
     return { error: "Service radius must be between 1 and 500 miles." }
 
@@ -78,7 +116,10 @@ export async function saveBusinessInfo(
     })
     .eq("user_id", user.id)
 
-  if (error) return { error: error.message }
+  if (error) {
+    console.error("[saveBusinessInfo] failed to save business info", error)
+    return { error: "Something went wrong saving your business info. Please try again." }
+  }
   redirect("/sc/onboarding/insurance")
 }
 
@@ -148,26 +189,14 @@ export async function checkAndActivateSC(): Promise<{ status: string; missing: s
 
   if (!sc) return { status: "not_found", missing: [] }
 
-  const missing: string[] = []
-
-  if (!sc.agreement_signed_at) missing.push("agreement")
-
-  if (!sc.insurance_verified) missing.push("insurance")
-
-  // insurance_verified only means the AI-extracted certificate passed rule
-  // checks — an admin still has to confirm the extraction before the SC can
-  // go live. Without this gate, this function would flip status straight to
-  // 'active' the moment insurance_verified flips true, silently overriding
-  // the 'pending_review' state that verify-insurance/route.ts just set.
-  if (sc.insurance_verified && !sc.insurance_reviewed_at) missing.push("admin_review")
-
-  // Check Stripe payouts_enabled
-  let payoutsEnabled = sc.stripe_onboarding_complete
-  if (sc.stripe_account_id && !payoutsEnabled) {
+  // Check Stripe payouts_enabled directly (live poll) in case the webhook hasn't
+  // landed yet — the webhook is the primary path, this is the client-side fallback.
+  let stripeOnboardingComplete = sc.stripe_onboarding_complete
+  if (sc.stripe_account_id && !stripeOnboardingComplete) {
     try {
       const account = await stripe.accounts.retrieve(sc.stripe_account_id)
-      payoutsEnabled = account.payouts_enabled ?? false
-      if (payoutsEnabled) {
+      stripeOnboardingComplete = account.payouts_enabled ?? false
+      if (stripeOnboardingComplete) {
         await supabase
           .from("sc_companies")
           .update({ stripe_onboarding_complete: true })
@@ -175,15 +204,6 @@ export async function checkAndActivateSC(): Promise<{ status: string; missing: s
       }
     } catch { /* stripe error — keep as false */ }
   }
-  if (!payoutsEnabled) missing.push("stripe")
 
-  if (missing.length === 0 && sc.status !== "active") {
-    await supabase
-      .from("sc_companies")
-      .update({ status: "active" })
-      .eq("user_id", user.id)
-    return { status: "active", missing: [] }
-  }
-
-  return { status: sc.status, missing }
+  return activateSCIfEligible(supabase, { ...sc, stripe_onboarding_complete: stripeOnboardingComplete })
 }
