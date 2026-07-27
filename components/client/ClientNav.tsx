@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
@@ -8,10 +9,15 @@ export default function ClientNav() {
   const pathname = usePathname()
 
   return (
-    <header className="border-b border-border bg-background/95 backdrop-blur sticky top-0 z-50">
+    <header className="relative border-b border-border bg-background/95 backdrop-blur sticky top-0 z-50">
+      <div
+        aria-hidden
+        className="absolute inset-x-0 bottom-0 h-px"
+        style={{ backgroundImage: "var(--gradient-brand)" }}
+      />
       <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-        <Link href="/dashboard" className="font-bold text-lg tracking-tight">
-          My Sign Job
+        <Link href="/dashboard" className="flex items-center">
+          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-9 w-auto" priority />
         </Link>
 
         <nav className="flex items-center gap-4">
@@ -28,7 +34,8 @@ export default function ClientNav() {
           </Link>
           <Link
             href="/order/new"
-            className="flex items-center bg-accent text-accent-foreground px-3 py-3 rounded-md text-sm font-medium hover:opacity-90 transition-opacity"
+            className="cut-corner-sm flex items-center text-accent-foreground px-3.5 py-2 text-sm font-semibold hover:opacity-90 transition-opacity"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
           >
             + New Sign
           </Link>

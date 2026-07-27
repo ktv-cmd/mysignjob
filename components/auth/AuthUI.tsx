@@ -1,11 +1,12 @@
 import Link from "next/link"
+import Image from "next/image"
 
 export function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30 px-4">
       <div className="w-full max-w-sm">
-        <Link href="/" className="block text-center font-bold text-lg mb-8">
-          My Sign Job
+        <Link href="/" className="flex justify-center mb-8">
+          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-10 w-auto" priority />
         </Link>
         <div className="bg-background border border-border rounded-2xl p-8">
           <h1 className="text-xl font-bold">{title}</h1>
@@ -41,7 +42,8 @@ export function SubmitButton({ pending, children }: { pending: boolean; children
     <button
       type="submit"
       disabled={pending}
-      className="w-full bg-accent text-accent-foreground rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+      className="cut-corner-sm w-full text-accent-foreground py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+      style={{ backgroundImage: "var(--gradient-brand)" }}
     >
       {pending ? "Please wait…" : children}
     </button>
