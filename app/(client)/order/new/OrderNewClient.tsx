@@ -6,10 +6,15 @@ import { toast } from "sonner"
 import { createClient as createBrowserClient } from "@/lib/supabase/client"
 import { saveGuestProfile } from "@/app/actions/auth"
 import PhotoUpload from "@/components/order/PhotoUpload"
+import VideoRulerCapture from "@/components/order/VideoRulerCapture"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
 import { createOrder } from "@/app/actions/order"
 import { analyzeLogoComplexity } from "@/app/actions/logo"
-import { computeSignDimensions, type SignDimensions } from "@/lib/sign-geometry"
+import {
+  computeSignDimensions, isPlausibleDimension, fitQuadToRatio,
+  MAX_SIGN_DIMENSION_INCHES, MAX_REFERENCE_INCHES,
+  type SignDimensions,
+} from "@/lib/sign-geometry"
 import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric, LogoAnalysis } from "@/types"
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
@@ -176,6 +181,12 @@ export default function OrderNewClient() {
   const router = useRouter()
   const [step, setStep] = useState<Step>("photo")
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
+  // "live" lets someone standing at the storefront right now capture a
+  // guided photo with their camera instead of uploading a file — see
+  // components/order/VideoRulerCapture.tsx. It only replaces photo
+  // acquisition; everything downstream (QuadSelector, size calculation)
+  // treats the result identically to an uploaded photo.
+  const [captureMode, setCaptureMode] = useState<"upload" | "live">("upload")
   const [quad, setQuad] = useState<QuadPoint[] | null>(null)
   // Reference-line calibration (the "app ruler" pattern) — client marks a
   // 2-point line on a known object; size is computed from it client-side.
@@ -460,8 +471,8 @@ export default function OrderNewClient() {
   // measurement entirely and build a SignDimensions from their typed numbers.
   const manualDimensionsValid = knownSize && (
     isCorner
-      ? knownFrontWidthInches > 0 && knownSideWidthInches > 0 && knownHeightInches > 0
-      : knownWidthInches > 0 && knownHeightInches > 0
+      ? isPlausibleDimension(knownFrontWidthInches) && isPlausibleDimension(knownSideWidthInches) && isPlausibleDimension(knownHeightInches)
+      : isPlausibleDimension(knownWidthInches) && isPlausibleDimension(knownHeightInches)
   )
   const signDimensions: SignDimensions | null = knownSize
     ? (manualDimensionsValid
@@ -476,6 +487,48 @@ export default function OrderNewClient() {
           }
         : null)
     : geometryResult
+
+  // Once real dimensions are known (typed, reference-calibrated, or later a
+  // Maps cross-check), silently snap whatever quad is currently drawn onto
+  // the correct ratio — closes the gap where the "I already know my exact
+  // size" path draws its quad during the earlier `area` step (before any
+  // ratio is known) and never revisits it, so a client could otherwise reach
+  // submission with a quad that's still an arbitrary, unrelated shape.
+  // QuadSelector is uncontrolled, so this pushes the fitted quad down via
+  // `applyQuad` rather than writing `quad` directly — see QuadSelector's
+  // Props doc comment.
+  //
+  // Guarded by the target *ratio* (not a one-shot "have we ever snapped"
+  // flag) so it: (a) re-snaps if the client edits the typed dimensions again
+  // after an earlier snap — a plain one-shot flag missed this, leaving the
+  // box locked to a stale shape that then silently failed the server-side
+  // ratio check at submit with no clue why; (b) does NOT re-snap on every
+  // frame while the client drags the reference line during the measured
+  // path, since scaling the reference changes width/height in lockstep and
+  // leaves their ratio (and thus this key) unchanged; (c) does NOT fight the
+  // client's own locked resize/rotate drags, which by construction always
+  // preserve the ratio they were locked to.
+  const lastSnappedRatioKeyRef = useRef<string | null>(null)
+  const [quadSnapTrigger, setQuadSnapTrigger] = useState<QuadPoint[] | undefined>(undefined)
+
+  useEffect(() => {
+    if (quad === null) lastSnappedRatioKeyRef.current = null
+  }, [quad])
+
+  useEffect(() => {
+    if (!signDimensions || !quad || !imgDims) return
+    if (!(signDimensions.heightInches > 0)) return // guard against a NaN ratio key from a degenerate measurement
+    const ratioKey = signDimensions.isCorner
+      ? `c:${((signDimensions.frontWidthInches ?? 0) / signDimensions.heightInches).toFixed(4)}:${((signDimensions.sideWidthInches ?? 0) / signDimensions.heightInches).toFixed(4)}`
+      : `f:${(signDimensions.widthInches / signDimensions.heightInches).toFixed(4)}`
+    if (lastSnappedRatioKeyRef.current === ratioKey) return
+    const aspect = imgDims.w / imgDims.h
+    const fitted = isCorner
+      ? fitQuadToRatio(quad, aspect, signDimensions.widthInches, signDimensions.heightInches, true, signDimensions.frontWidthInches, signDimensions.sideWidthInches)
+      : fitQuadToRatio(quad, aspect, signDimensions.widthInches, signDimensions.heightInches, false)
+    lastSnappedRatioKeyRef.current = ratioKey
+    setQuadSnapTrigger(fitted)
+  }, [signDimensions, quad, imgDims, isCorner])
 
   async function handleGuestSubmit() {
     const name = guestName.trim()
@@ -636,6 +689,10 @@ export default function OrderNewClient() {
       estimation_references: signDimensions.referencesUsed,
       estimation_angle_warning: signDimensions.angleWarning,
       selection_quad: quad as SignSpec["selection_quad"],
+      // The photo's own aspect ratio at the time the quad was drawn — lets
+      // the server interpret selection_quad's normalized coordinates as real
+      // proportions (see validateQuadMatchesRatio in lib/sign-geometry.ts).
+      image_aspect_ratio: imgDims ? imgDims.w / imgDims.h : undefined,
       // reference style derived from the sign-type / lighting choices
       reference_style: computedReferenceId,
       // Reference-line calibration used to compute the size above
@@ -745,7 +802,54 @@ export default function OrderNewClient() {
             <h1 className="text-2xl font-bold">Upload a photo of your storefront</h1>
             <p className="text-muted-foreground mt-1">We use it to measure your sign area and show you an AI preview before any company sees your order.</p>
           </div>
-          <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }} />
+          {photoDataUrl ? (
+            <div className="space-y-3">
+              <div className="relative rounded-xl overflow-hidden border border-border">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={photoDataUrl} alt="Storefront" className="w-full" />
+              </div>
+              <button
+                type="button"
+                onClick={() => { setPhotoDataUrl(null); setCaptureMode("upload"); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }}
+                className="py-3 text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                Use a different photo
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCaptureMode("upload")}
+                  className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
+                    captureMode === "upload" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">Upload a photo</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">Already have one on your phone or computer</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCaptureMode("live")}
+                  className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
+                    captureMode === "live" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                  }`}
+                >
+                  <span className="block text-sm font-semibold">Use my camera now</span>
+                  <span className="block text-xs text-muted-foreground mt-0.5">At the storefront right now — we'll guide you</span>
+                </button>
+              </div>
+              {captureMode === "live" ? (
+                <VideoRulerCapture
+                  onCapture={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }}
+                  onCancel={() => setCaptureMode("upload")}
+                />
+              ) : (
+                <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }} />
+              )}
+            </>
+          )}
           {photoDataUrl && (
             <button
               onClick={() => setStep("quad")}
@@ -807,6 +911,10 @@ export default function OrderNewClient() {
               })()}
               referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
               showReference={quadSubStep === "placement"}
+              lockedAspectRatio={!isCorner && signDimensions ? signDimensions.widthInches / signDimensions.heightInches : undefined}
+              lockedFrontRatio={isCorner && signDimensions && signDimensions.frontWidthInches ? signDimensions.frontWidthInches / signDimensions.heightInches : undefined}
+              lockedSideRatio={isCorner && signDimensions && signDimensions.sideWidthInches ? signDimensions.sideWidthInches / signDimensions.heightInches : undefined}
+              applyQuad={quadSnapTrigger}
               caption={quadSubStep === "placement" ? (
                 referenceType === "door" ? "Drag anywhere to move the door, or drag a corner to match its exact shape and height."
                 : referenceType === "brick" ? "Drag anywhere to move the outline, or drag a corner to match the brick row's exact shape and height."
@@ -871,6 +979,7 @@ export default function OrderNewClient() {
                             type="number"
                             inputMode="decimal"
                             min={0}
+                            max={MAX_SIGN_DIMENSION_INCHES}
                             value={knownFrontWidthInches || ""}
                             onChange={e => setKnownFrontWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                             placeholder="e.g. 60"
@@ -883,6 +992,7 @@ export default function OrderNewClient() {
                             type="number"
                             inputMode="decimal"
                             min={0}
+                            max={MAX_SIGN_DIMENSION_INCHES}
                             value={knownSideWidthInches || ""}
                             onChange={e => setKnownSideWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                             placeholder="e.g. 36"
@@ -896,6 +1006,7 @@ export default function OrderNewClient() {
                           type="number"
                           inputMode="decimal"
                           min={0}
+                          max={MAX_SIGN_DIMENSION_INCHES}
                           value={knownHeightInches || ""}
                           onChange={e => setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0)}
                           placeholder="e.g. 24"
@@ -911,6 +1022,7 @@ export default function OrderNewClient() {
                           type="number"
                           inputMode="decimal"
                           min={0}
+                          max={MAX_SIGN_DIMENSION_INCHES}
                           value={knownWidthInches || ""}
                           onChange={e => setKnownWidthInches(e.target.value ? parseFloat(e.target.value) : 0)}
                           placeholder="e.g. 60"
@@ -978,6 +1090,7 @@ export default function OrderNewClient() {
                     type="number"
                     inputMode="decimal"
                     min={1}
+                    max={MAX_REFERENCE_INCHES}
                     value={referenceInches}
                     onChange={e => setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)}
                     placeholder="Length in inches (e.g. 36)"
@@ -985,6 +1098,21 @@ export default function OrderNewClient() {
                   />
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setCaptureMode("live")
+                  setPhotoDataUrl(null)
+                  setQuad(null)
+                  setReference(null)
+                  setImgDims(null)
+                  setPreviewOptions([])
+                  setStep("photo")
+                }}
+                className="text-xs text-muted-foreground hover:text-foreground underline"
+              >
+                Standing at the storefront right now? Retake with a guided camera →
+              </button>
             </div>
           )}
 

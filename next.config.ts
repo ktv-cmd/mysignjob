@@ -23,8 +23,12 @@ const nextConfig: NextConfig = {
             value: "max-age=63072000; includeSubDomains; preload",
           },
           {
+            // camera=(self) allows the guided live-camera "video ruler"
+            // capture (components/order/VideoRulerCapture.tsx) to call
+            // getUserMedia — camera=() blocks it at the browser level
+            // regardless of what the user grants in the permission prompt.
             key: "Permissions-Policy",
-            value: "camera=(), microphone=(), geolocation=()",
+            value: "camera=(self), microphone=(), geolocation=()",
           },
         ],
       },

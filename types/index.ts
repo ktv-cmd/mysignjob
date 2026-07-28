@@ -98,6 +98,12 @@ export interface SignSpec {
   estimation_angle_warning: boolean
   // Selection quad (normalized 0–1) — 4 points [TL,TR,BR,BL] for flat, 6 points [TL,TM,TR,BR,BM,BL] for corner
   selection_quad: { x: number; y: number }[]
+  // The storefront photo's own width/height ratio at the time the quad was
+  // drawn — required to interpret selection_quad's normalized (0–1)
+  // coordinates as real proportions (see validateQuadMatchesRatio in
+  // lib/sign-geometry.ts). A "square" quad in normalized space isn't square
+  // unless the photo itself is square.
+  image_aspect_ratio?: number
   // Reference-line calibration ("app ruler") the client marked to compute size
   reference_type?: string             // e.g. "door" | "window" | "brick" | "custom"
   reference_inches?: number           // known real-world length of the reference line

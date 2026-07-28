@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useCallback } from "react"
+import { fitQuadToRatio } from "@/lib/sign-geometry"
 
 export type QuadPoint = { x: number; y: number } // normalized 0–1
 
@@ -14,12 +15,31 @@ interface Props {
   referenceIcon?: "door" | "brick" | "ruler" // visual overlay for the reference object — icon to place on top of the real object, instead of a plain ruler
   showReference?: boolean // when false, hides the reference overlay entirely and excludes it from hit-testing (client already knows the sign's exact size)
   caption?: string // overrides the default "drag the gold box corners" caption below the canvas — use when this render of the canvas is really about the reference (e.g. a dedicated door/brick placement screen), not the gold box
+  // Aspect-ratio lock — once the sign's real width:height ratio is known
+  // (typed, reference-calibrated, or a Maps cross-check), the parent passes
+  // these so the quad can no longer be freely stretched/skewed away from the
+  // real proportions. Flat mode uses lockedAspectRatio; corner mode uses
+  // lockedFrontRatio + lockedSideRatio (front/side width, each against the
+  // shared height) — pass both together for corner mode, neither locks
+  // anything on its own.
+  lockedAspectRatio?: number
+  lockedFrontRatio?: number
+  lockedSideRatio?: number
+  // One-shot parent-pushed quad override — QuadSelector is otherwise fully
+  // uncontrolled (see the "report the default quad on mount" effect below).
+  // The parent uses this exactly once, to silently snap whatever quad is
+  // currently drawn onto the correct ratio the moment real dimensions become
+  // known. Pass a freshly computed array to apply it; a stable/unchanged
+  // reference is a no-op.
+  applyQuad?: QuadPoint[]
 }
 
 const HANDLE_RADIUS = 10
 const GOLD = "#FFD740"
 const FOLD_COLOR = "#FF8C42"  // orange — fold handles are visually distinct
 const REFERENCE_COLOR = "#00E5FF" // cyan — reference line, distinct from quad/fold
+const LOCK_ACCENT = "#4ADE80"  // green — the resize/rotate handles that appear once the quad is ratio-locked, visually distinct from GOLD's free-drag corners
+const LOCK_MUTED = "rgba(255,255,255,0.6)"
 
 // Touch-only sizing: visible dot stays modest, but the invisible grab zone
 // clears Apple's ~44px minimum tap target so fingers don't need pixel accuracy.
@@ -31,6 +51,17 @@ const TOUCH_HIT_CSS_RADIUS = 24
 const LOUPE_CSS_RADIUS = 60
 const LOUPE_ZOOM = 2.5
 const LOUPE_CSS_OFFSET = 90
+
+// Locked-mode resize/rotate handle sizing (css px, same touch-scaling convention as above)
+const RESIZE_HANDLE_CSS = 8
+const ROTATE_HANDLE_CSS_RADIUS = 9
+const ROTATE_STEM_CSS_LEN = 30
+// Below this many canvas-px, an edge is treated as degenerate (effectively
+// zero-length) and the corner-mode resize drag it would anchor is skipped
+// rather than computing a direction vector from it — guards against a
+// collapsed/corrupted hexagon producing a (0,0) direction that would then
+// silently collapse that face to a point on every subsequent drag.
+const MIN_LOCK_DIR_PX = 1
 
 function defaultQuad(corner: boolean): QuadPoint[] {
   if (corner) return [
@@ -85,7 +116,7 @@ function drawLoupe(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img
   const srcRadius = loupeRadius / LOUPE_ZOOM
   const vOffset = LOUPE_CSS_OFFSET * scale
 
-  let cx = Math.max(loupeRadius, Math.min(W - loupeRadius, px))
+  const cx = Math.max(loupeRadius, Math.min(W - loupeRadius, px))
   let cy = py - vOffset
   if (cy - loupeRadius < 0) cy = py + vOffset
   cy = Math.max(loupeRadius, Math.min(H - loupeRadius, cy))
@@ -141,6 +172,39 @@ function drawLoupe(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img
 }
 
 type Pt = { x: number; y: number }
+
+// ── Small vector helpers (canvas-px space) for the aspect-ratio-locked
+// resize/rotate handles below. Kept tiny and generic on purpose — this is
+// the only place in the component that needs real vector math, everywhere
+// else works directly with x/y.
+function vecSub(a: Pt, b: Pt): Pt { return { x: a.x - b.x, y: a.y - b.y } }
+function vecAdd(a: Pt, b: Pt): Pt { return { x: a.x + b.x, y: a.y + b.y } }
+function vecScale(a: Pt, s: number): Pt { return { x: a.x * s, y: a.y * s } }
+function vecLen(a: Pt): number { return Math.hypot(a.x, a.y) }
+function vecUnit(a: Pt): Pt { const l = vecLen(a) || 1; return { x: a.x / l, y: a.y / l } }
+function vecDot(a: Pt, b: Pt): number { return a.x * b.x + a.y * b.y }
+function vecRotate(a: Pt, angle: number): Pt {
+  const c = Math.cos(angle), s = Math.sin(angle)
+  return { x: a.x * c - a.y * s, y: a.x * s + a.y * c }
+}
+
+// Canvas position of the rotate handle — offset outward from the shape's own
+// current top edge (flat) or fold line (corner), so it stays sensibly placed
+// as the shape rotates instead of always pointing screen-up. Shared between
+// draw() and findHandle() so the drawn position and the hit-tested position
+// never drift apart.
+function rotateHandlePos(pts: Pt[], isCornerMode: boolean): Pt {
+  if (isCornerMode) {
+    const tm = pts[1], bm = pts[4]
+    const up = vecUnit(vecSub(tm, bm))
+    return vecAdd(tm, vecScale(up, ROTATE_STEM_CSS_LEN))
+  }
+  const tl = pts[0], tr = pts[1]
+  const dirW = vecUnit(vecSub(tr, tl))
+  const outward = { x: dirW.y, y: -dirW.x } // perpendicular, pointing away from the box
+  const mid = { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }
+  return vecAdd(mid, vecScale(outward, ROTATE_STEM_CSS_LEN))
+}
 
 // Bilinear interpolation across an arbitrary quad [TL,TR,BR,BL] — s=0..1 left→right,
 // t=0..1 top→bottom. Lets the door/brick decorative details (panels, knob, mortar
@@ -269,14 +333,19 @@ function pointInPolygon(x: number, y: number, poly: { x: number; y: number }[]):
 // the common case for a straight-on photo of a straight door, without having
 // to carefully drag all 4 corners to avoid skewing it), then REF_BODY ("grab
 // the middle and move the whole thing") and QUAD_BODY ("grab anywhere inside
-// the gold box and move it"). Centralized here so
+// the gold box and move it"), then — only meaningful once the quad is
+// ratio-locked (see Props.lockedAspectRatio et al.) — QUAD_RESIZE_A/B and
+// QUAD_ROTATE: the handles that replace free corner-dragging once the quad's
+// shape must stay tied to a known real-world ratio. Centralized here so
 // findHandle/draw/onDown/onMove/onHover/onUp agree. Priority: quad corners
 // and reference points first (most specific), then the reference's edge
-// handles, then QUAD_BODY (the box is the primary thing on this step, so it
-// wins over REF_BODY where the two shapes overlap), then REF_BODY.
+// handles, then the lock handles, then QUAD_BODY (the box is the primary
+// thing on this step, so it wins over REF_BODY where the two shapes
+// overlap), then REF_BODY.
 function bodyDragIndices(quadLen: number, showReference: boolean, refLen: number) {
   const refPointCount = showReference ? refLen : 0
   const pointHandleCount = quadLen + refPointCount
+  const QUAD_BODY = pointHandleCount + 5
   return {
     refPointCount,
     pointHandleCount,
@@ -285,11 +354,30 @@ function bodyDragIndices(quadLen: number, showReference: boolean, refLen: number
     REF_EDGE_BOTTOM: pointHandleCount + 2,
     REF_EDGE_LEFT: pointHandleCount + 3,
     REF_BODY: pointHandleCount + 4,
-    QUAD_BODY: pointHandleCount + 5,
+    QUAD_BODY,
+    // Ratio-locked handles — QUAD_RESIZE_A is the sole resize handle in flat
+    // mode (BR corner) or the front-face handle in corner mode (BL);
+    // QUAD_RESIZE_B is corner-mode-only (side-face handle, BR).
+    QUAD_RESIZE_A: QUAD_BODY + 1,
+    QUAD_RESIZE_B: QUAD_BODY + 2,
+    QUAD_ROTATE: QUAD_BODY + 3,
   }
 }
 
-export default function QuadSelector({ imageDataUrl, onChange, corner = false, onReferenceChange, onImageLoad, referenceLabel = "reference", referenceIcon = "ruler", showReference = true, caption }: Props) {
+// Drag-start snapshot for the locked resize/rotate handles — captured once in
+// onDown so onMove has a stable anchor/orientation/direction to rebuild the
+// quad from on every subsequent move, rather than re-deriving it from a quad
+// that's actively being mutated mid-drag.
+type LockDrag =
+  | { kind: "resize-flat"; anchor: Pt; dirW: Pt; dirH: Pt; baseW: number; baseH: number }
+  | { kind: "resize-front" | "resize-side"; anchor: Pt; upDir: Pt; frontDir: Pt; sideDir: Pt }
+  | { kind: "rotate"; centroid: Pt; startAngle: number; snapshot: QuadPoint[] }
+
+export default function QuadSelector({
+  imageDataUrl, onChange, corner = false, onReferenceChange, onImageLoad,
+  referenceLabel = "reference", referenceIcon = "ruler", showReference = true, caption,
+  lockedAspectRatio, lockedFrontRatio, lockedSideRatio, applyQuad,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const imgRef = useRef<HTMLImageElement | null>(null)
   const quadRef = useRef<QuadPoint[]>(defaultQuad(corner))
@@ -298,9 +386,30 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
   // Last pointer position (normalized) while dragging a whole shape's body
   // (either the quad or the reference icon — only one drag is active at a time)
   const bodyDragLastRef = useRef<{ x: number; y: number } | null>(null)
+  const lockDragRef = useRef<LockDrag | null>(null)
   const prevCornerRef = useRef(corner)
   const [, forceRender] = useState(0)
   const [isCoarse, setIsCoarse] = useState(false)
+
+  // Once real dimensions are known (typed, reference-calibrated, or a Maps
+  // cross-check), the parent passes the target ratio(s) here and the quad can
+  // no longer be freely stretched/skewed — see Props doc comment above.
+  const isLocked = corner
+    ? (lockedFrontRatio != null && lockedFrontRatio > 0 && lockedSideRatio != null && lockedSideRatio > 0)
+    : (lockedAspectRatio != null && lockedAspectRatio > 0)
+
+  // Builds a fresh default quad, snapped to the current lock ratio when
+  // locked — shared by resetQuad() and the corner-toggle effect below so
+  // neither one can reintroduce an off-ratio quad through the back door.
+  function lockedDefaultQuad(): QuadPoint[] {
+    const base = defaultQuad(corner)
+    const canvas = canvasRef.current
+    if (!isLocked || !canvas || !canvas.width || !canvas.height) return base
+    const aspect = canvas.width / canvas.height
+    return corner
+      ? fitQuadToRatio(base, aspect, (lockedFrontRatio ?? 1) + (lockedSideRatio ?? 1), 1, true, lockedFrontRatio, lockedSideRatio)
+      : fitQuadToRatio(base, aspect, lockedAspectRatio ?? 1, 1, false)
+  }
 
   // Detect touch/coarse-pointer devices so mobile affordances stay off desktop.
   useEffect(() => {
@@ -320,6 +429,20 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
     onChange([...quadRef.current])
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Parent-pushed quad override — the one path a parent can still write into
+  // this otherwise-uncontrolled component, used exactly once to silently
+  // snap the currently-drawn quad onto the correct ratio the moment real
+  // dimensions become known (see Props.applyQuad doc comment).
+  useEffect(() => {
+    if (applyQuad && applyQuad.length === quadRef.current.length) {
+      quadRef.current = applyQuad.map(p => ({ ...p }))
+      draw()
+      onChange([...quadRef.current])
+      forceRender(n => n + 1)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [applyQuad])
 
   // Ruler mode's reference is a 2-point A/B line; door/brick sticker mode is
   // a 4-point [TL,TR,BR,BL] quad. When referenceIcon switches between them,
@@ -358,7 +481,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
   // Reset quad when corner mode toggles
   useEffect(() => {
     if (prevCornerRef.current !== corner) {
-      quadRef.current = defaultQuad(corner)
+      quadRef.current = lockedDefaultQuad()
       prevCornerRef.current = corner
       draw()
       onChange([...quadRef.current])
@@ -487,10 +610,22 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       ctx.fillText("Front", frontCx, frontCy)
       ctx.fillText("Side", sideCx, sideCy)
 
-      // Handles
+      // Handles — muted, non-interactive dots once ratio-locked (the fold and
+      // corners are no longer individually draggable; the resize/rotate
+      // handles drawn below take over that job).
       const handleColors = [GOLD, FOLD_COLOR, GOLD, GOLD, FOLD_COLOR, GOLD]
       const handleLabels = ["TL", "◆", "TR", "BR", "◆", "BL"]
       pts.forEach((p, i) => {
+        if (isLocked) {
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+          ctx.fillStyle = "rgba(255,255,255,0.85)"
+          ctx.fill()
+          ctx.strokeStyle = LOCK_MUTED
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+          return
+        }
         const isActive = isCoarse && i === activeIdx
         const r = isActive ? handleR * 1.25 : handleR
         if (isActive) {
@@ -534,6 +669,16 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
 
       const labels = ["TL", "TR", "BR", "BL"]
       pts.forEach((p, i) => {
+        if (isLocked) {
+          ctx.beginPath()
+          ctx.arc(p.x, p.y, 4, 0, Math.PI * 2)
+          ctx.fillStyle = "rgba(255,255,255,0.85)"
+          ctx.fill()
+          ctx.strokeStyle = LOCK_MUTED
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+          return
+        }
         const isActive = isCoarse && i === activeIdx
         const r = isActive ? handleR * 1.25 : handleR
         if (isActive) {
@@ -557,6 +702,58 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
         ctx.textBaseline = "middle"
         ctx.fillText(labels[i], p.x, p.y)
       })
+    }
+
+    // ── Aspect-ratio-locked resize/rotate handles ──
+    // Replace free corner-dragging once a real-world ratio is known — the
+    // whole reason this exists (see Props.lockedAspectRatio doc comment):
+    // the quad can still be resized/rotated/moved, just never independently
+    // stretched away from the locked width:height ratio.
+    if (isLocked) {
+      const rotatePos = rotateHandlePos(pts, corner)
+      const stemAnchor = corner ? pts[1] : { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 }
+
+      ctx.save()
+      ctx.strokeStyle = LOCK_ACCENT
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([3, 3])
+      ctx.beginPath()
+      ctx.moveTo(stemAnchor.x, stemAnchor.y)
+      ctx.lineTo(rotatePos.x, rotatePos.y)
+      ctx.stroke()
+      ctx.setLineDash([])
+      ctx.restore()
+
+      const rotR = isCoarse ? ROTATE_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.3 : ROTATE_HANDLE_CSS_RADIUS
+      ctx.beginPath()
+      ctx.arc(rotatePos.x, rotatePos.y, rotR, 0, Math.PI * 2)
+      ctx.fillStyle = "white"
+      ctx.fill()
+      ctx.strokeStyle = LOCK_ACCENT
+      ctx.lineWidth = 2.5
+      ctx.stroke()
+      ctx.fillStyle = LOCK_ACCENT
+      ctx.font = `${Math.round(rotR * 1.5)}px system-ui`
+      ctx.textAlign = "center"
+      ctx.textBaseline = "middle"
+      ctx.fillText("↻", rotatePos.x, rotatePos.y)
+
+      const resizeHalf = isCoarse ? RESIZE_HANDLE_CSS * canvasScale(canvas) * 1.3 : RESIZE_HANDLE_CSS
+      const drawResizeHandle = (p: Pt) => {
+        ctx.beginPath()
+        ctx.roundRect(p.x - resizeHalf, p.y - resizeHalf, resizeHalf * 2, resizeHalf * 2, 3)
+        ctx.fillStyle = "white"
+        ctx.fill()
+        ctx.strokeStyle = LOCK_ACCENT
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+      }
+      if (corner) {
+        drawResizeHandle(pts[5]) // BL — front face
+        drawResizeHandle(pts[3]) // BR — side face
+      } else {
+        drawResizeHandle(pts[2]) // BR
+      }
     }
 
     // ── Reference — ruler/measuring-tape treatment, or door/brick sticker quad ──
@@ -858,31 +1055,35 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
   function findHandle(x: number, y: number, W: number, H: number, canvas: HTMLCanvasElement, coarse: boolean): number | null {
     const quad = quadRef.current
     const reference = referenceRef.current
-    const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY } =
+    const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
       bodyDragIndices(quad.length, showReference, reference.length)
 
     // Point handles: quad corners, plus (when visible) every reference point
-    // — 2 for ruler mode, 4 for door/brick sticker mode.
+    // — 2 for ruler mode, 4 for door/brick sticker mode. Once ratio-locked,
+    // the quad's own corners are excluded (start past quad.length) — they're
+    // no longer individually draggable, the lock handles below take over.
     const pointHandles: QuadPoint[] = !showReference
       ? [...quad]
       : [...quad, ...reference]
+    const pointHandleStart = isLocked ? quad.length : 0
 
     let hit: number | null = null
     if (!coarse) {
-      for (let i = 0; i < pointHandles.length; i++) {
+      for (let i = pointHandleStart; i < pointHandles.length; i++) {
         const dist = Math.hypot(x - pointHandles[i].x * W, y - pointHandles[i].y * H)
         if (dist <= HANDLE_RADIUS * 1.8) { hit = i; break }
       }
     } else {
       const tolerance = TOUCH_HIT_CSS_RADIUS * canvasScale(canvas)
       let nearestDist = Infinity
-      pointHandles.forEach((p, i) => {
+      for (let i = pointHandleStart; i < pointHandles.length; i++) {
+        const p = pointHandles[i]
         const dist = Math.hypot(x - p.x * W, y - p.y * H)
         if (dist <= tolerance && dist < nearestDist) {
           nearestDist = dist
           hit = i
         }
-      })
+      }
     }
     if (hit !== null) return hit
 
@@ -907,6 +1108,24 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
         if (dist <= tolerance && dist < nearestDist) { nearestDist = dist; edgeHit = idx }
       }
       if (edgeHit !== null) return edgeHit
+    }
+
+    // Ratio-locked resize/rotate handles — checked before the whole-quad body
+    // test below since they sit at/near the quad's own corners and must win
+    // there (dragging the corner should resize, not translate the whole box).
+    if (isLocked) {
+      const pts = quad.map(p => ({ x: p.x * W, y: p.y * H }))
+      const candidates: [number, Pt][] = corner
+        ? [[QUAD_RESIZE_A, pts[5]], [QUAD_RESIZE_B, pts[3]], [QUAD_ROTATE, rotateHandlePos(pts, true)]]
+        : [[QUAD_RESIZE_A, pts[2]], [QUAD_ROTATE, rotateHandlePos(pts, false)]]
+      const tolerance = (coarse ? TOUCH_HIT_CSS_RADIUS : HANDLE_RADIUS * 1.8) * (coarse ? canvasScale(canvas) : 1)
+      let nearestDist = Infinity
+      let lockHit: number | null = null
+      for (const [idx, p] of candidates) {
+        const dist = Math.hypot(x - p.x, y - p.y)
+        if (dist <= tolerance && dist < nearestDist) { nearestDist = dist; lockHit = idx }
+      }
+      if (lockHit !== null) return lockHit
     }
 
     // Whole-quad body drag — grab anywhere inside the gold box to move it.
@@ -941,12 +1160,53 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       if (!canvas) return
       canvas.setPointerCapture(e.pointerId)
       const { x, y } = getCanvasCoords(e, canvas)
-      const idx = findHandle(x, y, canvas.width, canvas.height, canvas, isCoarse)
+      const W = canvas.width, H = canvas.height
+      const idx = findHandle(x, y, W, H, canvas, isCoarse)
       draggingRef.current = idx
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY } =
+      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quadRef.current.length, showReference, referenceRef.current.length)
       if (idx === QUAD_BODY || idx === REF_BODY || idx === REF_EDGE_TOP || idx === REF_EDGE_RIGHT || idx === REF_EDGE_BOTTOM || idx === REF_EDGE_LEFT) {
         bodyDragLastRef.current = { x: x / canvas.width, y: y / canvas.height }
+      }
+
+      // Snapshot the drag-start geometry for the locked resize/rotate
+      // handles — onMove rebuilds the quad from this on every subsequent
+      // move rather than re-deriving directions from a quad that's actively
+      // being mutated mid-drag (see LockDrag doc comment).
+      lockDragRef.current = null
+      if (isLocked && (idx === QUAD_RESIZE_A || idx === QUAD_RESIZE_B || idx === QUAD_ROTATE)) {
+        const pts = quadRef.current.map(p => ({ x: p.x * W, y: p.y * H }))
+        if (idx === QUAD_ROTATE) {
+          const centroid = pts.reduce((acc, p) => ({ x: acc.x + p.x / pts.length, y: acc.y + p.y / pts.length }), { x: 0, y: 0 })
+          const startAngle = Math.atan2(y - centroid.y, x - centroid.x)
+          lockDragRef.current = { kind: "rotate", centroid, startAngle, snapshot: quadRef.current.map(p => ({ ...p })) }
+        } else if (corner) {
+          const [, tm, , br, bm, bl] = pts
+          const upVec = vecSub(tm, bm), frontVec = vecSub(bl, bm), sideVec = vecSub(br, bm)
+          if (vecLen(upVec) >= MIN_LOCK_DIR_PX && vecLen(frontVec) >= MIN_LOCK_DIR_PX && vecLen(sideVec) >= MIN_LOCK_DIR_PX) {
+            lockDragRef.current = {
+              kind: idx === QUAD_RESIZE_A ? "resize-front" : "resize-side",
+              anchor: bm,
+              upDir: vecUnit(upVec),
+              frontDir: vecUnit(frontVec),
+              sideDir: vecUnit(sideVec),
+            }
+          }
+          // else: degenerate hexagon (a fold/face edge collapsed to ~0px) —
+          // leave lockDragRef null so onMove's resize branch is a no-op
+          // instead of computing a (0,0) direction from it.
+        } else {
+          const [tl, tr] = pts
+          const dirW = vecUnit(vecSub(tr, tl))
+          const dirH = { x: -dirW.y, y: dirW.x }
+          lockDragRef.current = {
+            kind: "resize-flat",
+            anchor: tl,
+            dirW, dirH,
+            baseW: lockedAspectRatio ?? 1,
+            baseH: 1,
+          }
+        }
       }
       draw()
     }
@@ -971,7 +1231,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       const rawPoint = { x: x / W, y: y / H }
       const quad = quadRef.current
       const reference = referenceRef.current
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY } =
+      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quad.length, showReference, reference.length)
 
       // Which two of the reference's [TL,TR,BR,BL] corners move together for
@@ -1006,6 +1266,65 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
             quad[i] = { x: quad[i].x + dx, y: quad[i].y + dy }
           }
           bodyDragLastRef.current = point
+        }
+      } else if (idx === QUAD_RESIZE_A || idx === QUAD_RESIZE_B) {
+        // Ratio-locked resize — rebuilds the whole quad from the drag-start
+        // snapshot (LockDrag) so width and height only ever move together
+        // along the locked ratio; never clamped to [0,1], same rationale as
+        // the reference points (whole-body drag, unaffected, stays clamped).
+        const drag = lockDragRef.current
+        if (drag && drag.kind === "resize-flat") {
+          const p = { x, y }
+          const diff = vecSub(p, drag.anchor)
+          const localW = vecDot(diff, drag.dirW)
+          const localH = vecDot(diff, drag.dirH)
+          const denom = drag.baseW * drag.baseW + drag.baseH * drag.baseH
+          let s = denom > 0 ? (localW * drag.baseW + localH * drag.baseH) / denom : 0
+          s = Math.max(4, s)
+          const newW = s * drag.baseW
+          const newH = s * drag.baseH
+          const tl = drag.anchor
+          const tr = vecAdd(tl, vecScale(drag.dirW, newW))
+          const br = vecAdd(tr, vecScale(drag.dirH, newH))
+          const bl = vecAdd(tl, vecScale(drag.dirH, newH))
+          quad[0] = { x: tl.x / W, y: tl.y / H }
+          quad[1] = { x: tr.x / W, y: tr.y / H }
+          quad[2] = { x: br.x / W, y: br.y / H }
+          quad[3] = { x: bl.x / W, y: bl.y / H }
+        } else if (drag && (drag.kind === "resize-front" || drag.kind === "resize-side")) {
+          const isFront = drag.kind === "resize-front"
+          const dir = isFront ? drag.frontDir : drag.sideDir
+          const ratio = isFront ? lockedFrontRatio! : lockedSideRatio!
+          const otherRatio = isFront ? lockedSideRatio! : lockedFrontRatio!
+          const p = { x, y }
+          const rawWidth = vecDot(vecSub(p, drag.anchor), dir)
+          const newWidth = Math.max(4, rawWidth)
+          const newHeight = Math.max(4, newWidth / ratio)
+          const newOtherWidth = newHeight * otherRatio
+          const bm = drag.anchor
+          const tm = vecAdd(bm, vecScale(drag.upDir, newHeight))
+          const frontW = isFront ? newWidth : newOtherWidth
+          const sideW = isFront ? newOtherWidth : newWidth
+          const bl = vecAdd(bm, vecScale(drag.frontDir, frontW))
+          const br = vecAdd(bm, vecScale(drag.sideDir, sideW))
+          const tl = vecAdd(tm, vecScale(drag.frontDir, frontW))
+          const tr = vecAdd(tm, vecScale(drag.sideDir, sideW))
+          quad[0] = { x: tl.x / W, y: tl.y / H }
+          quad[1] = { x: tm.x / W, y: tm.y / H }
+          quad[2] = { x: tr.x / W, y: tr.y / H }
+          quad[3] = { x: br.x / W, y: br.y / H }
+          quad[4] = { x: bm.x / W, y: bm.y / H }
+          quad[5] = { x: bl.x / W, y: bl.y / H }
+        }
+      } else if (idx === QUAD_ROTATE) {
+        const drag = lockDragRef.current
+        if (drag && drag.kind === "rotate") {
+          const angle = Math.atan2(y - drag.centroid.y, x - drag.centroid.x) - drag.startAngle
+          drag.snapshot.forEach((p, i) => {
+            const px = p.x * W, py = p.y * H
+            const rel = vecRotate({ x: px - drag.centroid.x, y: py - drag.centroid.y }, angle)
+            quad[i] = { x: (drag.centroid.x + rel.x) / W, y: (drag.centroid.y + rel.y) / H }
+          })
         }
       } else if (idx === REF_BODY) {
         // Whole-reference drag: translate every reference point by the
@@ -1053,12 +1372,16 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       const { x, y } = getCanvasCoords(e, canvas)
       const idx = findHandle(x, y, canvas.width, canvas.height, canvas, false)
       const quad = quadRef.current
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY } =
+      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quad.length, showReference, referenceRef.current.length)
       if (idx === REF_EDGE_TOP || idx === REF_EDGE_BOTTOM) {
         canvas.style.cursor = "ns-resize"
       } else if (idx === REF_EDGE_LEFT || idx === REF_EDGE_RIGHT) {
         canvas.style.cursor = "ew-resize"
+      } else if (idx === QUAD_RESIZE_A || idx === QUAD_RESIZE_B) {
+        canvas.style.cursor = "nwse-resize"
+      } else if (idx === QUAD_ROTATE) {
+        canvas.style.cursor = "grab"
       } else if (idx === REF_BODY || idx === QUAD_BODY) {
         canvas.style.cursor = "move"
       } else if (idx !== null) {
@@ -1072,8 +1395,9 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       if (draggingRef.current !== null) {
         const idx = draggingRef.current
         const quad = quadRef.current
-        const { QUAD_BODY } = bodyDragIndices(quad.length, showReference, referenceRef.current.length)
-        if (idx < quad.length || idx === QUAD_BODY) {
+        const { QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
+          bodyDragIndices(quad.length, showReference, referenceRef.current.length)
+        if (idx < quad.length || idx === QUAD_BODY || idx === QUAD_RESIZE_A || idx === QUAD_RESIZE_B || idx === QUAD_ROTATE) {
           onChange([...quadRef.current])
         } else {
           onReferenceChange?.([...referenceRef.current])
@@ -1082,6 +1406,7 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       }
       draggingRef.current = null
       bodyDragLastRef.current = null
+      lockDragRef.current = null
       draw()
     }
 
@@ -1098,12 +1423,12 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onUp)
     }
-  }, [getCanvasCoords, onChange, onReferenceChange, isCoarse, referenceIcon, showReference])
+  }, [getCanvasCoords, onChange, onReferenceChange, isCoarse, referenceIcon, showReference, isLocked, corner, lockedAspectRatio, lockedFrontRatio, lockedSideRatio])
 
   useEffect(() => { draw() })
 
   function resetQuad() {
-    quadRef.current = defaultQuad(corner)
+    quadRef.current = lockedDefaultQuad()
     draw()
     onChange([...quadRef.current])
   }
@@ -1120,7 +1445,9 @@ export default function QuadSelector({ imageDataUrl, onChange, corner = false, o
       </div>
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          {caption ?? (corner
+          {caption ?? (isLocked
+            ? "Drag the green square to resize or the green circle to rotate — the box stays true to your sign's proportions."
+            : corner
             ? "Line up the orange ◆ dots with the building's corner, then fit the gold box to each wall."
             : "Drag the corners of the gold box until it covers exactly where the sign will go.")}
         </p>
