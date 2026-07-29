@@ -25,6 +25,20 @@ export const metadata: Metadata = {
   title: "Mysignjobs.com — Get Your Business Sign Done",
   description:
     "The easiest way to get a professional business sign. Upload a photo, get an instant AI preview, receive competitive quotes from local sign companies.",
+  icons: {
+    // The mark's checkmark is near-black — legible in a light browser tab
+    // bar but nearly invisible in a dark one, same issue the wordmark had.
+    // These media-scoped entries key off the OS/browser color scheme (Chrome
+    // dark mode etc.), independent of this site's own light/dark toggle —
+    // /favicon.ico stays the file-convention default for browsers that don't
+    // support prefers-color-scheme on <link rel="icon">.
+    icon: [
+      { url: "/favicon.ico", media: "(prefers-color-scheme: light)" },
+      { url: "/favicon-dark.ico", media: "(prefers-color-scheme: dark)" },
+      { url: "/icon.png", type: "image/png", sizes: "512x512", media: "(prefers-color-scheme: light)" },
+      { url: "/icon-dark.png", type: "image/png", sizes: "512x512", media: "(prefers-color-scheme: dark)" },
+    ],
+  },
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
