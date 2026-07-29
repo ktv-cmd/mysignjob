@@ -7,6 +7,7 @@ export interface User {
   email: string
   role: UserRole
   full_name: string | null
+  phone: string | null
   stripe_customer_id: string | null
   agreement_signed_at: string | null
   payment_method_added: boolean

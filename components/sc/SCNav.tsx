@@ -1,9 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import ThemeToggle from "@/components/shared/ThemeToggle"
+import BrandLogo from "@/components/shared/BrandLogo"
 
 export default function SCNav() {
   const pathname = usePathname()
@@ -23,7 +24,7 @@ export default function SCNav() {
       />
       <div className="container mx-auto px-4 h-14 flex items-center justify-between gap-2 overflow-x-auto">
         <Link href="/sc/dashboard" className="flex items-center gap-2 whitespace-nowrap flex-shrink-0">
-          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-9 w-auto" priority />
+          <BrandLogo className="h-9 w-auto" priority />
           <span className="text-muted-foreground font-normal text-sm">· SC Portal</span>
         </Link>
 
@@ -42,6 +43,7 @@ export default function SCNav() {
               {link.label}
             </Link>
           ))}
+          <ThemeToggle />
         </nav>
       </div>
     </header>

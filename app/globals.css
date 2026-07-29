@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+/* Ties Tailwind's dark: variant to next-themes' class-based toggle (the
+   .dark class on <html>) instead of the OS-level prefers-color-scheme media
+   query — otherwise dark: utilities would ignore the manual toggle button
+   and only ever follow the system setting, out of sync with the CSS custom
+   properties below (which already key off .dark directly). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /*
  * Token system rebuilt from the actual logo artwork (public/brand/logo-mark.png):
  * the pin's ring is a real vertical gradient sampled pixel-by-pixel top to

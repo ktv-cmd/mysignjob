@@ -1,9 +1,10 @@
 "use client"
 
 import Link from "next/link"
-import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
+import ThemeToggle from "@/components/shared/ThemeToggle"
+import BrandLogo from "@/components/shared/BrandLogo"
 
 export default function ClientNav() {
   const pathname = usePathname()
@@ -17,7 +18,7 @@ export default function ClientNav() {
       />
       <div className="container mx-auto px-4 h-14 flex items-center justify-between">
         <Link href="/dashboard" className="flex items-center">
-          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-9 w-auto" priority />
+          <BrandLogo className="h-9 w-auto" priority />
         </Link>
 
         <nav className="flex items-center gap-4">
@@ -45,6 +46,7 @@ export default function ClientNav() {
           >
             Account
           </Link>
+          <ThemeToggle />
         </nav>
       </div>
     </header>

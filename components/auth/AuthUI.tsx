@@ -1,12 +1,12 @@
 import Link from "next/link"
-import Image from "next/image"
+import BrandLogo from "@/components/shared/BrandLogo"
 
 export function AuthShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30 px-4">
       <div className="w-full max-w-sm">
         <Link href="/" className="flex justify-center mb-8">
-          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-10 w-auto" priority />
+          <BrandLogo className="h-10 w-auto" priority />
         </Link>
         <div className="bg-background border border-border rounded-2xl p-8">
           <h1 className="text-xl font-bold">{title}</h1>

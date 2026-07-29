@@ -1,7 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
+import ThemeToggle from "@/components/shared/ThemeToggle"
+import BrandLogo from "@/components/shared/BrandLogo"
 
 export default async function Home() {
   const supabase = await createClient()
@@ -29,7 +30,7 @@ export default async function Home() {
           style={{ backgroundImage: "var(--gradient-brand)" }}
         />
         <div className="container mx-auto px-4 h-14 flex items-center justify-between">
-          <Image src="/brand/logo-horizontal.png" alt="Mysignjobs.com" width={160} height={47} className="h-9 w-auto" priority />
+          <BrandLogo className="h-9 w-auto" priority />
           <div className="flex items-center gap-4">
             <Link href="/login" className="text-sm text-muted-foreground hover:text-foreground">
               Log in
@@ -41,6 +42,7 @@ export default async function Home() {
             >
               Get Started
             </Link>
+            <ThemeToggle />
           </div>
         </div>
       </header>
