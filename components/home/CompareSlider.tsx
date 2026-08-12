@@ -5,10 +5,12 @@ import { useRef, useState } from "react"
 const MIN_PCT = 6
 const MAX_PCT = 94
 
-// Draggable before/after reveal — "before" is an illustrative placeholder
-// (this is where the client's own storefront photo will go), "after" is a
-// real example render, so nothing here is a fabricated customer result.
-export default function CompareSlider({ afterSrc, afterAlt }: { afterSrc: string; afterAlt: string }) {
+// Draggable before/after reveal — "before" is a generic rendered storefront
+// (not a real business), "after" is the same building with an AI-generated
+// sign added, so nothing here is a fabricated real-customer result.
+export default function CompareSlider({
+  beforeSrc, beforeAlt, afterSrc, afterAlt,
+}: { beforeSrc: string; beforeAlt: string; afterSrc: string; afterAlt: string }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const draggingRef = useRef(false)
   const [pct, setPct] = useState(50)
@@ -42,27 +44,10 @@ export default function CompareSlider({ afterSrc, afterAlt }: { afterSrc: string
           <img src={afterSrc} alt={afterAlt} className="h-full w-full object-cover" draggable={false} />
         </div>
 
-        {/* Before — clipped placeholder, revealed as the handle drags right */}
+        {/* Before — clipped storefront photo, revealed as the handle drags right */}
         <div className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - pct}% 0 0)` }}>
-          <div
-            className="flex h-full w-full items-center justify-center"
-            style={{
-              backgroundColor: "#cfd3d6",
-              backgroundImage:
-                "repeating-linear-gradient(0deg, rgba(0,0,0,0.08) 0 2px, transparent 2px 34px), repeating-linear-gradient(90deg, rgba(0,0,0,0.06) 0 2px, transparent 2px 84px)",
-              backgroundPosition: "0 0, 42px 17px",
-              filter: "saturate(0.25) brightness(0.98)",
-            }}
-          >
-            <div className="rounded-2xl border-2 border-dashed border-black/35 bg-white/55 px-5 py-6 text-center">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="mx-auto mb-2 h-6.5 w-6.5 text-[#12151b]">
-                <rect x="3" y="6" width="18" height="13" rx="1.5" />
-                <path d="M8 6l1.5-2.5h5L16 6" />
-                <circle cx="12" cy="12.5" r="3.2" />
-              </svg>
-              <span className="text-[11px] font-semibold uppercase tracking-wide text-[#3a3f47]">Your storefront photo</span>
-            </div>
-          </div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={beforeSrc} alt={beforeAlt} className="h-full w-full object-cover" draggable={false} />
         </div>
 
         <div className="absolute left-3.5 top-3.5 z-10 rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">

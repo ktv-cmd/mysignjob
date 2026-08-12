@@ -148,8 +148,10 @@ export default async function Home() {
           </div>
 
           <CompareSlider
-            afterSrc="/examples/letters-lighting-bg/front_light_night.jpg"
-            afterAlt="AI-rendered channel letter sign lit up on a brick storefront at night"
+            beforeSrc="/examples/hero-pictures/storefront-1.jpeg"
+            beforeAlt="Storefront with a blank sign panel"
+            afterSrc="/examples/hero-pictures/storefront-1-after.png"
+            afterAlt="Same storefront with an AI-rendered illuminated Mysignjobs.com sign"
           />
         </div>
       </section>
