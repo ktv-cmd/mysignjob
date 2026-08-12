@@ -1,25 +1,17 @@
 import type { Metadata } from "next"
-import { Inter, Sora, IBM_Plex_Mono, IBM_Plex_Sans, Big_Shoulders } from "next/font/google"
+import { IBM_Plex_Mono, Inter, Sora } from "next/font/google"
 import "./globals.css"
 import { Toaster } from "sonner"
 import Providers from "@/components/shared/Providers"
 
+// Site-wide body face — soft, neutral, close to the humanist feel of SF Pro.
 const inter = Inter({ subsets: ["latin"], variable: "--font-inter" })
-// Display face — deliberately paired to echo the logo wordmark's confident,
-// rounded weight without going fully playful.
+// Display face — a rounded geometric sans that echoes the wordmark's soft
+// weight without the condensed, industrial edge Big Shoulders had.
 const sora = Sora({ subsets: ["latin"], variable: "--font-sora" })
 // Reserved for literal measurements in this product: order IDs, prices,
 // W x H dimensions — not a general-purpose accent face.
 const plexMono = IBM_Plex_Mono({ subsets: ["latin"], weight: ["500", "600"], variable: "--font-plex-mono" })
-// Scoped to the marketing homepage's "fabrication ticket" redesign only —
-// not swapped in app-wide, so the rest of the product keeps Inter/Sora.
-const plexSans = IBM_Plex_Sans({ subsets: ["latin"], weight: ["400", "500", "600"], variable: "--font-plex-sans" })
-// "Big Shoulders" is a variable family (opsz axis distinguishes the "Text"
-// vs "Display" cuts) but next/font/google only allows the axes option when
-// weight is set to "variable" — since this is only ever used at headline
-// sizes here, static 700/900 weights render condensed either way and avoid
-// that variable-font wiring entirely.
-const bigShoulders = Big_Shoulders({ subsets: ["latin"], weight: ["700", "900"], variable: "--font-big-shoulders" })
 
 export const metadata: Metadata = {
   title: "Mysignjobs.com — Get Your Business Sign Done",
@@ -43,7 +35,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${sora.variable} ${plexMono.variable} ${plexSans.variable} ${bigShoulders.variable}`}>
+    <html lang="en" suppressHydrationWarning className={`${inter.variable} ${sora.variable} ${plexMono.variable}`}>
       <body className="min-h-full antialiased">
         <Providers>
           {children}

@@ -8,8 +8,13 @@ export function AuthShell({ title, subtitle, children }: { title: string; subtit
         <Link href="/" className="flex justify-center mb-8">
           <BrandLogo className="h-10 w-auto" priority />
         </Link>
-        <div className="bg-background border border-border rounded-2xl p-8">
-          <h1 className="text-xl font-bold">{title}</h1>
+        <div className="relative bg-background border border-border/70 rounded-2xl shadow-soft-lg p-8 overflow-hidden">
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
+          />
+          <h1 className="text-2xl font-semibold">{title}</h1>
           <p className="text-sm text-muted-foreground mb-6">{subtitle}</p>
           {children}
         </div>
@@ -30,7 +35,7 @@ export function Field({
       <input
         name={name}
         type={type}
-        className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+        className="mt-1 w-full rounded-2xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
         {...rest}
       />
     </label>
@@ -42,7 +47,7 @@ export function SubmitButton({ pending, children }: { pending: boolean; children
     <button
       type="submit"
       disabled={pending}
-      className="cut-corner-sm w-full text-accent-foreground py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+      className="rounded-full w-full text-accent-foreground py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
       style={{ backgroundImage: "var(--gradient-brand)" }}
     >
       {pending ? "Please wait…" : children}

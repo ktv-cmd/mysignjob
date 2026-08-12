@@ -25,12 +25,12 @@ export default function CompareSlider({ afterSrc, afterAlt }: { afterSrc: string
     <div className="relative">
       <div
         aria-hidden
-        className="absolute -inset-3 rounded-[3px] opacity-50 blur-2xl"
+        className="absolute -inset-3 rounded-2xl opacity-50 blur-2xl"
         style={{ backgroundImage: "var(--gradient-brand)" }}
       />
       <div
         ref={containerRef}
-        className="relative aspect-square overflow-hidden rounded-[3px] cursor-ew-resize select-none touch-none shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
+        className="relative aspect-square overflow-hidden rounded-2xl cursor-ew-resize select-none touch-none shadow-[0_0_0_1px_rgba(255,255,255,0.08)]"
         onPointerDown={(e) => { draggingRef.current = true; setFromClientX(e.clientX) }}
         onPointerMove={(e) => { if (draggingRef.current) setFromClientX(e.clientX) }}
         onPointerUp={() => { draggingRef.current = false }}
@@ -54,7 +54,7 @@ export default function CompareSlider({ afterSrc, afterAlt }: { afterSrc: string
               filter: "saturate(0.25) brightness(0.98)",
             }}
           >
-            <div className="border-2 border-dashed border-black/35 bg-white/55 px-5 py-6 text-center">
+            <div className="rounded-2xl border-2 border-dashed border-black/35 bg-white/55 px-5 py-6 text-center">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="mx-auto mb-2 h-6.5 w-6.5 text-[#12151b]">
                 <rect x="3" y="6" width="18" height="13" rx="1.5" />
                 <path d="M8 6l1.5-2.5h5L16 6" />
@@ -65,10 +65,10 @@ export default function CompareSlider({ afterSrc, afterAlt }: { afterSrc: string
           </div>
         </div>
 
-        <div className="absolute left-3.5 top-3.5 z-10 rounded-sm bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
+        <div className="absolute left-3.5 top-3.5 z-10 rounded-full bg-black/65 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-white">
           Before
         </div>
-        <div className="absolute right-3.5 top-3.5 z-10 flex items-center gap-1 rounded-sm bg-white/92 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#12151b]">
+        <div className="absolute right-3.5 top-3.5 z-10 flex items-center gap-1 rounded-full bg-white/92 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-[#12151b]">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" className="h-2.5 w-2.5">
             <path d="M4 12l5 5L20 6" />
           </svg>

@@ -18,7 +18,7 @@ export default async function AccountPage() {
   return (
     <div className="max-w-lg mx-auto">
       <div className="mb-8">
-        <h1 className="text-2xl font-bold">Account</h1>
+        <h1 className="text-2xl font-semibold">Account</h1>
         <p className="text-muted-foreground mt-1">Manage your contact details</p>
       </div>
       <AccountForm email={profile.email} fullName={profile.full_name} phone={profile.phone} role={profile.role} />

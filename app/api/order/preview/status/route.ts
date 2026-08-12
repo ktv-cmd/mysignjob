@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import type { ColorReport } from "@/lib/ai/preview"
 
 // Polling endpoint — returns the current status of a preview job and, when done,
 // the public URLs of the generated previews. RLS ensures users only see their own.
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const { data: job, error } = await supabase
     .from("preview_jobs")
-    .select("status, result_urls, error, user_id")
+    .select("status, result_urls, result_colors, error, user_id")
     .eq("id", jobId)
     .single()
 
@@ -25,6 +26,9 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     status: job.status,
     previewUrls: (job.result_urls as string[] | null) ?? [],
+    // AI-reported color(s), parallel to previewUrls — only set for
+    // logoColorMatch variants; null for everything else.
+    previewColors: (job.result_colors as (ColorReport | null)[] | null) ?? [],
     error: job.error ?? null,
   })
 }

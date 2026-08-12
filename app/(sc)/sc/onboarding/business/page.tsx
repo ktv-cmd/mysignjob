@@ -30,7 +30,7 @@ export default function BusinessInfoPage() {
             <select
               name="state"
               required
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+              className="w-full rounded-2xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
             >
               <option value="">Select…</option>
               {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -47,7 +47,7 @@ export default function BusinessInfoPage() {
           <select
             name="service_radius_miles"
             defaultValue="25"
-            className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+            className="w-full rounded-2xl border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
           >
             <option value="10">10 miles — neighborhood only</option>
             <option value="25">25 miles — city &amp; nearby suburbs</option>
@@ -59,12 +59,13 @@ export default function BusinessInfoPage() {
           </p>
         </div>
 
-        {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+        {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
 
         <button
           type="submit"
           disabled={pending}
-          className="w-full bg-accent text-accent-foreground rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="rounded-full w-full text-white py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+          style={{ backgroundImage: "var(--gradient-brand)" }}
         >
           {pending ? "Saving…" : "Continue"}
         </button>
@@ -93,7 +94,7 @@ function StepHeader({ step, title, subtitle }: { step: number; title: string; su
           )
         })}
       </div>
-      <h1 className="text-2xl font-bold">{title}</h1>
+      <h1 className="text-2xl font-semibold">{title}</h1>
       <p className="text-muted-foreground mt-1">{subtitle}</p>
     </div>
   )

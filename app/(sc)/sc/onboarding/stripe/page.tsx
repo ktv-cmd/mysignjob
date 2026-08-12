@@ -44,8 +44,21 @@ export default function StripeOnboardingPage() {
     if (verificationStatus.status === "active") {
       return (
         <div className="text-center py-12 space-y-4">
-          <div className="text-5xl">🎉</div>
-          <h1 className="text-2xl font-bold">You&apos;re approved!</h1>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-11 w-11 mx-auto"
+            style={{ color: "var(--color-success)" }}
+            aria-hidden
+          >
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8 12.5l2.5 2.5L16 9" />
+          </svg>
+          <h1 className="text-2xl font-semibold">You&apos;re approved!</h1>
           <p className="text-muted-foreground">
             All checks passed. Taking you to your dashboard…
           </p>
@@ -56,12 +69,12 @@ export default function StripeOnboardingPage() {
     if (verificationStatus.missing.length > 0) {
       return (
         <div className="space-y-4">
-          <h1 className="text-2xl font-bold">Almost there</h1>
+          <h1 className="text-2xl font-semibold">Almost there</h1>
           <p className="text-muted-foreground">A few things still need attention:</p>
           <ul className="space-y-2">
             {verificationStatus.missing.map((item) => (
               <li key={item} className="flex items-center gap-2 text-sm">
-                <span className="text-orange-500">•</span>
+                <span className="text-amber-600 dark:text-amber-400">•</span>
                 <span className="capitalize">{item === "stripe" ? "Payout account not fully verified by Stripe yet" : item}</span>
               </li>
             ))}
@@ -70,7 +83,8 @@ export default function StripeOnboardingPage() {
             <button
               onClick={handleConnect}
               disabled={loading}
-              className="bg-accent text-accent-foreground rounded-lg px-6 py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-full text-white px-6 py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              style={{ backgroundImage: "var(--gradient-brand)" }}
             >
               {loading ? "Redirecting…" : "Continue Stripe verification"}
             </button>
@@ -84,7 +98,7 @@ export default function StripeOnboardingPage() {
     <div>
       <StepHeader step={4} />
       <div className="mt-6 space-y-6">
-        <div className="border border-border rounded-xl p-6 space-y-3">
+        <div className="border border-border rounded-2xl p-6 space-y-3">
           <h2 className="font-semibold">Secure payout setup via Stripe</h2>
           <p className="text-sm text-muted-foreground leading-relaxed">
             Mysignjobs.com uses Stripe Connect to send your earnings directly to your bank account.
@@ -98,12 +112,13 @@ export default function StripeOnboardingPage() {
           </ul>
         </div>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {error && <p className="text-sm text-destructive">{error}</p>}
 
         <button
           onClick={handleConnect}
           disabled={loading}
-          className="w-full bg-accent text-accent-foreground rounded-lg py-3 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+          className="rounded-full w-full text-white py-3 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+          style={{ backgroundImage: "var(--gradient-brand)" }}
         >
           {loading ? "Redirecting to Stripe…" : "Set up payouts with Stripe →"}
         </button>
@@ -136,7 +151,7 @@ function StepHeader({ step }: { step: number }) {
           )
         })}
       </div>
-      <h1 className="text-2xl font-bold">Payout Setup</h1>
+      <h1 className="text-2xl font-semibold">Payout Setup</h1>
       <p className="text-muted-foreground mt-1">Connect your bank account to receive payments.</p>
     </div>
   )

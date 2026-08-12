@@ -46,17 +46,23 @@
   --gradient-brand: linear-gradient(135deg, var(--color-brand-sky), var(--color-brand-indigo), var(--color-brand-plum));
   --gradient-brand-diagonal: linear-gradient(115deg, var(--color-brand-sky) 0%, var(--color-brand-indigo) 55%, var(--color-brand-plum) 100%);
 
-  --radius-sm: 0.375rem;
-  --radius-md: 0.5rem;
-  --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  /* Generous, soft radii — nothing sharp anywhere in the product. */
+  --radius-sm: 0.625rem;
+  --radius-md: 0.875rem;
+  --radius-lg: 1.25rem;
+  --radius-xl: 1.75rem;
 
-  /* Display face echoes the wordmark's confident, rounded weight; body stays
-     on Inter for long-form legibility; mono is reserved for the things that
+  /* Soft, Apple-leaning identity: Sora is a rounded geometric face for
+     headings (it already echoed the wordmark's soft weight even before this
+     pass), Inter for body copy — both close to the neutral, humanist feel
+     of SF Pro without literally being it. Mono reserved for the things that
      are literally measurements in this product — order IDs, prices, W x H. */
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-heading: var(--font-sora), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-plex-mono), ui-monospace, "SF Mono", monospace;
+
+  --shadow-soft: 0 1px 2px rgba(20, 22, 29, 0.04), 0 8px 24px -12px rgba(20, 22, 29, 0.12);
+  --shadow-soft-lg: 0 2px 4px rgba(20, 22, 29, 0.04), 0 16px 40px -16px rgba(20, 22, 29, 0.18);
 }
 
 .dark {
@@ -85,14 +91,17 @@ body {
 
 h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-heading);
+  font-weight: 600;
+  letter-spacing: -0.015em;
 }
 
-/* Cut-corner signature — a flat-cut panel corner, echoing dimensional sign
-   fabrication and the pin mark's geometry. Used sparingly: primary CTAs and
-   the landing page's feature cards only, never as a blanket card style. */
-.cut-corner {
-  clip-path: polygon(0 0, calc(100% - 1.25rem) 0, 100% 1.25rem, 100% 100%, 0 100%);
+/* Soft elevation — replaces the old hard-edged hairline-border language.
+   Two depths: .shadow-soft for cards sitting on the page, .shadow-soft-lg
+   for anything that should feel like it's floating above it (modals, the
+   primary CTA on hover). */
+.shadow-soft {
+  box-shadow: var(--shadow-soft);
 }
-.cut-corner-sm {
-  clip-path: polygon(0 0, calc(100% - 0.75rem) 0, 100% 0.75rem, 100% 100%, 0 100%);
+.shadow-soft-lg {
+  box-shadow: var(--shadow-soft-lg);
 }

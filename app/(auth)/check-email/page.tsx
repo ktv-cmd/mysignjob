@@ -12,9 +12,27 @@ export default function CheckEmailPage({
         <Link href="/" className="flex justify-center mb-8">
           <BrandLogo className="h-10 w-auto" priority />
         </Link>
-        <div className="bg-background border border-border rounded-2xl p-8">
-          <div className="text-4xl mb-4">📬</div>
-          <h1 className="text-xl font-bold mb-2">Check your email</h1>
+        <div className="relative bg-background border border-border/70 rounded-2xl shadow-soft-lg p-8 overflow-hidden">
+          <div
+            aria-hidden
+            className="absolute inset-x-0 top-0 h-1"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
+          />
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-9 w-9 mx-auto mb-4"
+            style={{ color: "var(--color-brand-indigo)" }}
+            aria-hidden
+          >
+            <rect x="3" y="5" width="18" height="14" rx="1.5" />
+            <path d="M3.5 6.5L12 13l8.5-6.5" />
+          </svg>
+          <h1 className="text-2xl font-semibold mb-2">Check your email</h1>
           <p className="text-sm text-muted-foreground leading-relaxed">
             We sent a confirmation link to your email address. Click the link to
             activate your account, then come back to log in.

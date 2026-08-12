@@ -105,18 +105,19 @@ export default async function OrderPage({
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       {submitted && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-green-800">
+        <div className="bg-success/10 dark:bg-success/15 border border-success/30 rounded-2xl p-4 text-success">
           <p className="font-semibold">Order submitted.</p>
           <p className="text-sm mt-1">We'll email you as quotes come in.</p>
         </div>
       )}
 
       {/* Status card */}
-      <div className="bg-card border border-border rounded-xl p-6 space-y-3">
+      <div className="relative bg-card border border-border/70 rounded-2xl shadow-soft p-6 pt-7 space-y-3 overflow-hidden">
+        <div aria-hidden className="absolute inset-x-0 top-0 h-1" style={{ backgroundImage: "var(--gradient-brand)" }} />
         <div className="flex items-start justify-between gap-4">
           <div>
             <p className="text-xs text-muted-foreground uppercase tracking-wide font-medium">Order Status</p>
-            <h1 className="text-2xl font-bold mt-1">{info.label}</h1>
+            <h1 className="text-2xl font-semibold mt-1">{info.label}</h1>
           </div>
           <StatusBadge status={o.status} />
         </div>
@@ -126,7 +127,7 @@ export default async function OrderPage({
 
       {/* Quote ready — review and pay deposit */}
       {selectedBid && (
-        <div className="bg-card border border-accent/40 rounded-xl p-6 space-y-4">
+        <div className="bg-card border border-accent/40 rounded-2xl p-6 space-y-4">
           <h2 className="font-semibold">Your Quote</h2>
           <dl className="grid grid-cols-2 gap-x-6 gap-y-2 text-sm">
             <dt className="text-muted-foreground">Sign Company</dt>
@@ -144,13 +145,13 @@ export default async function OrderPage({
 
       {/* Installation photos — review & approve or request changes */}
       {jobReview && (
-        <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+        <div className="bg-card border border-border/70 rounded-2xl shadow-soft p-6 space-y-4">
           <h2 className="font-semibold">Installation Photos</h2>
           {jobReview.install_photos.length > 0 ? (
             <div className="grid grid-cols-3 gap-2">
               {jobReview.install_photos.map((url, i) => (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img key={url} src={url} alt={`Install photo ${i + 1}`} className="rounded-lg border border-border w-full aspect-square object-cover" />
+                <img key={url} src={url} alt={`Install photo ${i + 1}`} className="rounded-2xl border border-border w-full aspect-square object-cover" />
               ))}
             </div>
           ) : (
@@ -161,9 +162,9 @@ export default async function OrderPage({
             <ReviewJobActions orderId={o.id} finalAmountCents={finalAmountCents} />
           )}
           {o.status === "revision_requested" && jobReview.client_revision_notes && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-              <p className="font-semibold text-amber-800 text-sm">Your revision request</p>
-              <p className="text-sm text-amber-700 mt-1 whitespace-pre-wrap">{jobReview.client_revision_notes}</p>
+            <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-2xl p-4">
+              <p className="font-semibold text-amber-700 dark:text-amber-400 text-sm">Your revision request</p>
+              <p className="text-sm text-amber-700/90 dark:text-amber-400/90 mt-1 whitespace-pre-wrap">{jobReview.client_revision_notes}</p>
             </div>
           )}
         </div>
@@ -176,21 +177,21 @@ export default async function OrderPage({
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Storefront Photo</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={o.storefront_photo_url} alt="Storefront" className="rounded-xl border border-border w-full" />
+              <img src={o.storefront_photo_url} alt="Storefront" className="rounded-2xl border border-border w-full" />
             </div>
           )}
           {o.ai_preview_url && (
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">AI Preview</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={o.ai_preview_url} alt="AI Preview" className="rounded-xl border border-border w-full" />
+              <img src={o.ai_preview_url} alt="AI Preview" className="rounded-2xl border border-border w-full" />
             </div>
           )}
         </div>
       )}
 
       {/* Sign spec */}
-      <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div className="bg-card border border-border/70 rounded-2xl shadow-soft p-6 space-y-4">
         <h2 className="font-semibold">Sign Details</h2>
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-sm">
           <Row label="Business Name" value={spec.business_name} />
@@ -200,11 +201,25 @@ export default async function OrderPage({
               spec.awning_frame_style.replace(/_/g, " ").replace(/\b\w/g, l => l.toUpperCase())
             } />
           ) : (
-            <Row label="Primary Color" value={
-              <span className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.primary_color }} />
-                {spec.primary_color}
-              </span>
+            <Row label="Color" value={
+              spec.logo_color_match ? (
+                <span className="flex items-center gap-2 flex-wrap">
+                  <span>Matched to your logo — the sign company color-matches it exactly</span>
+                  {spec.logo_color_match_hex?.letters && (
+                    <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <span className="w-3.5 h-3.5 rounded-full border border-border inline-block" style={{ background: spec.logo_color_match_hex.letters }} />
+                      {spec.logo_color_match_hex.letters}
+                      {spec.logo_color_match_hex.panel && ` / ${spec.logo_color_match_hex.panel} panel`}
+                      <span className="italic">(AI-estimated)</span>
+                    </span>
+                  )}
+                </span>
+              ) : (
+                <span className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.primary_color }} />
+                  {spec.primary_color}
+                </span>
+              )
             } />
           )}
           {spec.sign_type === "awning" && spec.awning_fabric ? (
@@ -216,7 +231,7 @@ export default async function OrderPage({
               </span>
             } />
           ) : (
-            spec.secondary_color && (
+            !spec.logo_color_match && spec.secondary_color && (
               <Row label="Secondary Color" value={
                 <span className="flex items-center gap-2">
                   <span className="w-4 h-4 rounded-full border border-border inline-block" style={{ background: spec.secondary_color }} />
@@ -261,33 +276,44 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+// Same dot-badge dye lot as the dashboard's StatusBadge: brand hues carry
+// meaning, tinted from a single hex so it reads correctly in both themes.
+const STATUS_DYE: Record<string, string> = {
+  submitted: "#4C7FB3",
+  bidding: "#d97706",
+  quote_ready: "#d97706",
+  accepted: "#55508C",
+  deposit_paid: "#55508C",
+  in_progress: "#55508C",
+  submitted_for_review: "#d97706",
+  revision_requested: "#d97706",
+  approved: "#15803d",
+  completed: "#15803d",
+  cancelled: "#dc2626",
+  disputed: "#dc2626",
+  draft: "#6b7280",
+}
+
 function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    submitted: "bg-blue-100 text-blue-800",
-    bidding: "bg-yellow-100 text-yellow-800",
-    quote_ready: "bg-purple-100 text-purple-800",
-    accepted: "bg-indigo-100 text-indigo-800",
-    deposit_paid: "bg-cyan-100 text-cyan-800",
-    in_progress: "bg-orange-100 text-orange-800",
-    submitted_for_review: "bg-pink-100 text-pink-800",
-    revision_requested: "bg-amber-100 text-amber-800",
-    approved: "bg-teal-100 text-teal-800",
-    completed: "bg-green-100 text-green-800",
-    cancelled: "bg-red-100 text-red-800",
-    disputed: "bg-red-100 text-red-800",
-    draft: "bg-muted text-muted-foreground",
-  }
-  const cls = colors[status] ?? "bg-muted text-muted-foreground"
+  const hex = STATUS_DYE[status] ?? "#6b7280"
   const label = STATUS_LABELS[status]?.label ?? status
-  return <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${cls}`}>{label}</span>
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-2xl border px-2.5 py-1 text-xs font-semibold"
+      style={{ borderColor: `${hex}40`, backgroundColor: `${hex}14`, color: hex }}
+    >
+      <span aria-hidden className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: hex }} />
+      {label}
+    </span>
+  )
 }
 
 function ProgressBar({ step, total }: { step: number; total: number }) {
   const pct = Math.round((step / total) * 100)
   return (
     <div className="space-y-1">
-      <div className="h-1.5 bg-muted rounded-full overflow-hidden">
-        <div className="h-full bg-accent rounded-full transition-all" style={{ width: `${pct}%` }} />
+      <div className="h-1.5 bg-muted rounded-2xl overflow-hidden">
+        <div className="h-full rounded-2xl transition-all" style={{ width: `${pct}%`, backgroundImage: "var(--gradient-brand)" }} />
       </div>
       <p className="text-xs text-muted-foreground">Step {step} of {total}</p>
     </div>

@@ -48,7 +48,9 @@ If the user prompt states the backer panel is ALREADY PAINTED into Image 1 (a so
 
 ## LIGHTING & EMISSION:
 IF 'NO LIGHT': PROHIBITED — glow, bloom, halo, neon, luminescence, LED, backlight. REQUIRED — matte surfaces, hard contact shadows (Ambient Occlusion), sun-lit/daylight only, opaque solid materials, zero emission, external environmental lighting only.
-IF ILLUMINATED: the per-request description below names exactly one lighting technique — treat that name as the complete and only emission spec for this render, not a menu to draw from. Front-lit: ray-traced subsurface scattering through the acrylic faces + edge glow; the wall directly behind the sign stays dark, untouched by any glow. Back-lit: a ray-traced light wash on the wall BEHIND the sign with inverse-square falloff; the letter faces themselves stay opaque and unlit. Side-mounted accent: a thin bright LED rim-light traced along each letter's side return-plane edges only — it does not by itself add any front-face glow or wall wash, only combine it with front-lit or back-lit glow when the per-request description names both together. Full/complete surround: front-lit face glow + back-lit wall wash + side-mounted edge accents, all three applied together, each confined to its own surface exactly as described above.
+IF ILLUMINATED: the per-request description below names one or more lighting techniques — treat that combination as the complete and exact emission spec for this render, nothing more and nothing less. Render illumination the way a camera actually captures a lit sign at night: bright emissive surfaces with visible soft bloom/halation at their edges, strong contrast against whatever stays dark. Front-lit: subsurface scattering through the acrylic faces makes them glow brightly with visible bloom; the wall directly behind the sign stays completely dark — zero glow, zero wash. Back-lit: a soft halo of light washes onto the wall BEHIND the sign with visible inverse-square falloff (brightest near the sign, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front. Side-mounted accent: a thin, crisp, bright LED rim-light traced along each letter's side return-plane edges only — it never by itself adds front-face glow or a wall wash; combine it with front-lit and/or back-lit glow only when the per-request description names both together. Full/complete surround: front-lit face glow + back-lit wall wash + side-mounted edge accents, ALL THREE rendered at full brightness simultaneously — do not dim any one technique to accommodate the others.
+
+TIME OF DAY: by default, match Image 1's existing ambient lighting exactly (do not add glow effects a daytime photo wouldn't show). ONLY if the per-request instructions include a "TIME OF DAY" line requesting a dusk/night scene, relight the entire environment accordingly — darker sky, dimmer ambient/surrounding light — while keeping the new sign's illumination as the dominant, clearly visible light source.
 
 ## COLOR INTEGRITY:
 - LOGO PROVIDED (Image 2): use exact HEX/Pantone from the logo — non-negotiable brand identity.
@@ -129,6 +131,9 @@ export interface PreviewJobParams {
   hasBackground?: boolean
   bgMaterial?: "aluminum" | "acrylic"
   acrylic?: PromptColor | null
+  // See SignPromptParams.logoColorMatch — when true, panelFace/panelBg/acrylic
+  // above are deliberately null; the fabricator matches the logo directly.
+  logoColorMatch?: boolean
   count?: number
   // Free-form client instructions appended to the generated prompt.
   customPrompt?: string
@@ -174,6 +179,100 @@ function nearestAspectRatio(w: number, h: number): string {
   )[0]
 }
 
+// ─── Style reference images ────────────────────────────────────────────────────
+// Real example photos (already in the repo for the order form's picker
+// thumbnails) attached as an extra input image alongside the storefront + logo,
+// so the model has a visual anchor for "front-lit" vs "back-lit" vs a specific
+// awning frame silhouette — text descriptions alone are much fuzzier than a
+// real photo. Best-effort: a missing/unreadable file just means no reference
+// gets attached (buildSignPrompt only describes a reference image slot when one
+// was actually loaded, via styleReferenceKind).
+async function loadPublicImage(relPath: string): Promise<{ mime: string; base64: string } | null> {
+  try {
+    const fs = await import("fs/promises")
+    const path = await import("path")
+    const ext = relPath.split(".").pop()?.toLowerCase()
+    const mime = ext === "png" ? "image/png" : ext === "webp" ? "image/webp" : "image/jpeg"
+    const buf = await fs.readFile(path.join(process.cwd(), "public", relPath))
+    return { mime, base64: buf.toString("base64") }
+  } catch {
+    return null
+  }
+}
+
+const LIGHTING_REFERENCE_DIR = "/examples/letters-lighting-bg"
+// Day/night filenames as already used for the lightingStyle picker thumbnails
+// in OrderNewClient.tsx — reused here instead of duplicating a fresh asset set.
+const LIGHTING_REFERENCE_FILES: Record<string, { day: string; night: string }> = {
+  front: { day: "Front_Light_day.jpg", night: "front_light_night.jpg" },
+  back: { day: "Back_Light_day.jpg", night: "back_light_night.jpg" },
+  both: { day: "Back_Front_Light_day.jpg", night: "front_back_night.jpg" },
+  front_back: { day: "Back_Front_Light_day.jpg", night: "front_back_night.jpg" },
+  front_side: { day: "Front_Side_ligth_day.jpg", night: "front_side_night.jpg" },
+  back_side: { day: "Side_Light_day.jpg", night: "Side_light_night.jpg" },
+  full: { day: "Full_light_day.jpg", night: "Full_light_night.jpg" },
+}
+const AWNING_FRAME_REFERENCE_DIR = "/examples/awning-frames"
+
+// Mirrors the branching in buildBasePrompt's final "channel letters" case — the
+// only branch that actually reads lightingType/lightingDescription(). Awning,
+// light-box, no-light-outdoor, and logo-only-no-background all describe their
+// lighting in fixed, non-technique-specific prose, so a lighting reference
+// photo wouldn't correspond to anything the prompt is asking for.
+function wantsLightingReference(params: PreviewJobParams): boolean {
+  return params.referenceId !== "awning"
+    && params.referenceId !== "light-box"
+    && params.referenceId !== "no-light-outdoor"
+    && !(params.brandMode === "logo-only" && params.hasBackground === false)
+}
+
+async function resolveStyleReference(
+  params: PreviewJobParams,
+  sceneTime: "day" | "night",
+): Promise<{ kind: "lighting" | "awning-frame"; mime: string; base64: string } | null> {
+  if (params.referenceId === "awning" && params.awningFrame) {
+    const img = await loadPublicImage(`${AWNING_FRAME_REFERENCE_DIR}/${params.awningFrame}.jpg`)
+    return img ? { kind: "awning-frame" as const, ...img } : null
+  }
+  if (wantsLightingReference(params) && params.lightingType) {
+    const file = LIGHTING_REFERENCE_FILES[params.lightingType]?.[sceneTime]
+    if (!file) return null
+    const img = await loadPublicImage(`${LIGHTING_REFERENCE_DIR}/${file}`)
+    return img ? { kind: "lighting" as const, ...img } : null
+  }
+  return null
+}
+
+// AI-estimated color(s) reported back when colorReportClause() asked for them
+// (logoColorMatch cases only — no swatch was ever handed to the prompt, so
+// this is the ONLY place the actual hex used ends up as data instead of just
+// pixels in the image). Best-effort: read off a photo, not a real swatch
+// lookup — callers should present it as needing verification before ordering
+// material, not as an authoritative Pantone/hex spec.
+export interface ColorReport {
+  letters?: string
+  panel?: string
+}
+
+// Parses the "COLOR_REPORT: LETTERS=#RRGGBB; PANEL=#RRGGBB" line requested by
+// colorReportClause(). Tolerant of the model paraphrasing around it (searches
+// the whole response text, not just the first line) but strict about the hex
+// format itself — a malformed or missing report just yields undefined rather
+// than a guessed value.
+function parseColorReport(text: string): ColorReport | undefined {
+  const match = text.match(/COLOR_REPORT:\s*([^\n]+)/i)
+  if (!match) return undefined
+  const report: ColorReport = {}
+  for (const pair of match[1]!.split(";")) {
+    const [key, value] = pair.split("=")
+    const hex = value?.match(/#[0-9a-fA-F]{6}/)?.[0]
+    if (!hex || !key) continue
+    if (/letters?/i.test(key)) report.letters = hex
+    else if (/panel/i.test(key)) report.panel = hex
+  }
+  return Object.keys(report).length > 0 ? report : undefined
+}
+
 async function generateOne(params: {
   annotatedBuffer: Buffer
   logoBase64: string | null
@@ -185,8 +284,13 @@ async function generateOne(params: {
   maskBuffer: Buffer
   W: number
   H: number
-}): Promise<string> {
-  const { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H } = params
+  // Style reference photo (lighting technique or awning frame shape), loaded
+  // from public/examples — always the LAST image part, matching the image
+  // number styleReferenceSlotDesc() names in the prompt text.
+  styleRefBase64?: string | null
+  styleRefMime?: string
+}): Promise<{ dataUrl: string; colorReport?: ColorReport }> {
+  const { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H, styleRefBase64, styleRefMime } = params
 
   const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = await import("@google/genai")
   const ai = new GoogleGenAI({ apiKey })
@@ -197,6 +301,9 @@ async function generateOne(params: {
   ]
   if (logoBase64) {
     parts.push({ inlineData: { mimeType: logoMime, data: logoBase64 } })
+  }
+  if (styleRefBase64) {
+    parts.push({ inlineData: { mimeType: styleRefMime ?? "image/jpeg", data: styleRefBase64 } })
   }
 
   const maxRetries = 2
@@ -221,13 +328,13 @@ async function generateOne(params: {
       })
 
       let generatedBase64: string | null = null
+      let responseText = ""
       for (const part of response.candidates?.[0]?.content?.parts ?? []) {
-        const p = part as { inlineData?: { data: string; mimeType: string } }
-        if (p.inlineData?.data) {
-          generatedBase64 = p.inlineData.data
-          break
-        }
+        const p = part as { inlineData?: { data: string; mimeType: string }; text?: string }
+        if (p.inlineData?.data && !generatedBase64) generatedBase64 = p.inlineData.data
+        if (p.text) responseText += p.text
       }
+      const colorReport = parseColorReport(responseText)
 
       if (!generatedBase64) {
         const reason = (response.candidates?.[0] as { finishReason?: string })?.finishReason
@@ -271,7 +378,7 @@ async function generateOne(params: {
         .toBuffer()
       await debugDump("composite", compositedJpeg)
 
-      return `data:image/jpeg;base64,${compositedJpeg.toString("base64")}`
+      return { dataUrl: `data:image/jpeg;base64,${compositedJpeg.toString("base64")}`, colorReport }
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
       const msg = lastError.message.toLowerCase()
@@ -284,12 +391,14 @@ async function generateOne(params: {
   throw lastError ?? new Error("Preview generation failed.")
 }
 
-// Core: given the original image buffer + params, return N composited preview data URLs.
+// Core: given the original image buffer + params, return N composited preview
+// results (each with its data URL and, when logoColorMatch requested one, the
+// AI-reported color it actually used).
 export async function generatePreviewDataUrls(
   originalBuffer: Buffer,
   logoDataUrl: string | null | undefined,
   params: PreviewJobParams,
-): Promise<string[]> {
+): Promise<{ dataUrl: string; colorReport?: ColorReport }[]> {
   const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) throw new Error("GEMINI_API_KEY not set")
 
@@ -384,7 +493,7 @@ export async function generatePreviewDataUrls(
     }
   }
 
-  const prompt = buildSignPrompt({
+  const sharedPromptParams = {
     businessName: params.businessName,
     brandMode: params.brandMode,
     hasLogo,
@@ -399,21 +508,48 @@ export async function generatePreviewDataUrls(
     hasBackground: params.hasBackground,
     bgMaterial: params.bgMaterial,
     acrylic: params.acrylic,
+    logoColorMatch: params.logoColorMatch,
     awningFrame: params.awningFrame,
     fabricName: params.fabricName,
     awningIllumination: params.awningIllumination,
     isCorner,
     foldXPct,
     customPrompt: params.customPrompt,
-  })
+  }
 
   const genCount = Math.min(Math.max(1, params.count ?? 3), 3)
-  const shared = { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H }
+
+  // A daytime input photo can't show whether LED illumination reads at all, so
+  // when the sign is actually illuminated, split the variants across day and
+  // dusk/night renders — the night ones are what makes the glow visible. Only
+  // worth doing with room to spare a variant; a single-image request stays day
+  // so it still matches the uploaded photo. buildSignPrompt no-ops the night
+  // clause for non-illuminated cases (no-light-outdoor, non-lit awnings), so
+  // nightCount naturally has no effect there even if we didn't gate it here.
+  const isIlluminatedScene =
+    params.referenceId === "awning" ? params.awningIllumination === "internal_led" :
+    params.referenceId === "no-light-outdoor" ? false :
+    true
+  const nightCount = isIlluminatedScene && genCount > 1 ? Math.floor(genCount / 2) : 0
+  const sceneTimes = Array.from({ length: genCount }, (_, i): "day" | "night" => i >= genCount - nightCount ? "night" : "day")
+
+  // Resolve each variant's style reference photo BEFORE building its prompt —
+  // the prompt only claims a reference image slot (styleReferenceKind) when a
+  // matching file actually loaded, so client/server text always matches what
+  // was really sent. Day and night variants of a lighting reference use
+  // different photos (matching their own scene), so this has to happen per
+  // variant, not once for the whole job.
+  const variants = await Promise.all(sceneTimes.map(async (sceneTime) => {
+    const styleRef = await resolveStyleReference(params, sceneTime)
+    const prompt = buildSignPrompt({ ...sharedPromptParams, sceneTime, styleReferenceKind: styleRef?.kind })
+    return { prompt, styleRefBase64: styleRef?.base64 ?? null, styleRefMime: styleRef?.mime }
+  }))
+  const shared = { annotatedBuffer, logoBase64, logoMime, apiKey, sharp, originalBuffer, maskBuffer, W, H }
 
   // Run all generations concurrently — cuts wall-clock time by ~3× vs sequential.
   // Each call independently retries on 503/timeout so one slow call doesn't block others.
   const settled = await Promise.allSettled(
-    Array.from({ length: genCount }, () => generateOne(shared)),
+    variants.map(v => generateOne({ ...shared, ...v })),
   )
 
   const results = settled.flatMap(r => r.status === "fulfilled" ? [r.value] : [])
@@ -516,12 +652,16 @@ export async function runPreviewJob(jobId: string): Promise<void> {
       logoDataUrl = params.logoDataUrl
     }
 
-    const dataUrls = await generatePreviewDataUrls(originalBuffer, logoDataUrl, params)
+    const previews = await generatePreviewDataUrls(originalBuffer, logoDataUrl, params)
 
-    // Upload each composited preview to storage and collect public URLs.
+    // Upload each composited preview to storage and collect public URLs, plus
+    // whatever AI color report came back with it (undefined for most
+    // variants — only logoColorMatch cases request one).
     const urls: string[] = []
-    for (let i = 0; i < dataUrls.length; i++) {
-      const buf = Buffer.from(dataUrls[i]!.split(",")[1]!, "base64")
+    const colors: (ColorReport | null)[] = []
+    for (let i = 0; i < previews.length; i++) {
+      const { dataUrl, colorReport } = previews[i]!
+      const buf = Buffer.from(dataUrl.split(",")[1]!, "base64")
       const path = `previews/${job.user_id}/${jobId}-${i}.jpg`
       const { error: upErr } = await supabase.storage.from("public-assets").upload(path, buf, {
         contentType: "image/jpeg",
@@ -529,11 +669,13 @@ export async function runPreviewJob(jobId: string): Promise<void> {
       })
       if (upErr) throw new Error(`Failed to upload preview ${i}: ${upErr.message}`)
       urls.push(supabase.storage.from("public-assets").getPublicUrl(path).data.publicUrl)
+      colors.push(colorReport ?? null)
     }
 
     await supabase.from("preview_jobs").update({
       status: "done",
       result_urls: urls,
+      result_colors: colors,
       updated_at: new Date().toISOString(),
     }).eq("id", jobId)
   } catch (err) {

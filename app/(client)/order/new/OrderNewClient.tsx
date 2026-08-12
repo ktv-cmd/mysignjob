@@ -7,19 +7,23 @@ import { createClient as createBrowserClient } from "@/lib/supabase/client"
 import { saveGuestProfile } from "@/app/actions/auth"
 import PhotoUpload from "@/components/order/PhotoUpload"
 import VideoRulerCapture from "@/components/order/VideoRulerCapture"
+import ARMeasureCapture, { isARMeasureSupported } from "@/components/order/ARMeasureCapture"
+import PhoneHandoff from "@/components/order/PhoneHandoff"
+import MeasureAppNudge from "@/components/order/MeasureAppNudge"
 import QuadSelector, { type QuadPoint } from "@/components/order/QuadSelector"
+import DoorCornerTap from "@/components/order/DoorCornerTap"
 import { createOrder } from "@/app/actions/order"
-import { analyzeLogoComplexity } from "@/app/actions/logo"
+import { isPdfFile, pdfFileToLogoDataUrl } from "@/lib/pdf-logo"
 import {
   computeSignDimensions, isPlausibleDimension, fitQuadToRatio,
   MAX_SIGN_DIMENSION_INCHES, MAX_REFERENCE_INCHES,
   type SignDimensions,
 } from "@/lib/sign-geometry"
-import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric, LogoAnalysis } from "@/types"
+import { computeDoorHomographyDimensions } from "@/lib/sign-homography"
+import type { IlluminationType, SignMaterial, SignSpec, AwningFrameStyle, SunbrellaFabric } from "@/types"
 import {
   DURABOND_COLORS, ACRYLIC_COLORS,
   DEFAULT_PANEL_FACE_COLOR, DEFAULT_PANEL_BG_COLOR, DEFAULT_ACRYLIC_COLOR,
-  nearestColor, colorDistance,
   type PanelColor, type AcrylicColor,
 } from "@/lib/sign-colors"
 import {
@@ -68,13 +72,13 @@ const LIGHTING_STYLE_LABELS: Record<"front" | "back" | "back_side" | "front_back
   full: "Full 360° (front, back + side)",
 }
 
-// Reference-object presets for the calibration line — standard inches for
-// common storefront objects, plus a client-typed custom length.
-const REFERENCE_PRESETS: { id: string; label: string; inches: number | null }[] = [
-  { id: "door", label: "Door (standard height, 80\")", inches: 80 },
-  { id: "brick", label: "One brick row (8\")", inches: 8 },
-  { id: "custom", label: "Something else — I know its size", inches: null },
-]
+// Suggested height for the entrance door, used only to prefill the reference
+// input. It is a starting guess, NOT a measurement: 80" (6'8") is the US
+// residential standard, while commercial storefront entrances are frequently
+// 84" or taller. Since this single number scales every dimension derived from
+// the photo, leaving it untouched is tracked (referenceAssumed) and caps the
+// reported confidence — see computeSignDimensions in lib/sign-geometry.ts.
+const DEFAULT_DOOR_INCHES = 80
 
 const AWNING_LIGHTING: { value: IlluminationType; label: string; desc: string }[] = [
   { value: "none",         label: "No Lighting",             desc: "Daytime only, no illumination" },
@@ -177,30 +181,79 @@ const SUNBRELLA_COLORS: SunbrellaFabric[] = [
 
 const DEFAULT_AWNING_FABRIC = SUNBRELLA_COLORS.find(c => c.code === "4601")! // Pacific Blue
 
-export default function OrderNewClient() {
+export default function OrderNewClient({ startInCaptureMode = false }: { startInCaptureMode?: boolean }) {
   const router = useRouter()
   const [step, setStep] = useState<Step>("photo")
   const [photoDataUrl, setPhotoDataUrl] = useState<string | null>(null)
   // "live" lets someone standing at the storefront right now capture a
   // guided photo with their camera instead of uploading a file — see
-  // components/order/VideoRulerCapture.tsx. It only replaces photo
+  // components/order/VideoRulerCapture.tsx. "ar" (see ARMeasureCapture.tsx)
+  // goes further — it taps 4 real-world corners with WebXR and hands back
+  // real inches, not just a photo. All three only replace photo
   // acquisition; everything downstream (QuadSelector, size calculation)
-  // treats the result identically to an uploaded photo.
-  const [captureMode, setCaptureMode] = useState<"upload" | "live">("upload")
+  // treats the result identically to an uploaded photo, except that an "ar"
+  // result also short-circuits the reference-measurement sub-steps below
+  // (see arMeasurement).
+  // startInCaptureMode arrives from the desktop QR hand-off — see the page's
+  // own comment. Taking the photo is the entire reason that device was brought
+  // into the flow, so it opens on the camera rather than the file picker.
+  const [captureMode, setCaptureMode] = useState<"upload" | "live" | "ar">(
+    startInCaptureMode ? "live" : "upload"
+  )
+  // Whether this browser/device can run the WebXR AR measurement flow —
+  // resolved asynchronously (isARMeasureSupported awaits navigator.xr's own
+  // promise), so it starts false and the "Measure with AR" option simply
+  // doesn't exist until proven supported. Never shown, never an error, on a
+  // device that can't do it — there is nothing degraded to explain.
+  const [arSupported, setArSupported] = useState(false)
   const [quad, setQuad] = useState<QuadPoint[] | null>(null)
-  // Reference-line calibration (the "app ruler" pattern) — client marks a
-  // 2-point line on a known object; size is computed from it client-side.
-  const [referenceType, setReferenceType] = useState<string>("door")
-  const [referenceInches, setReferenceInches] = useState<number>(80)
+  // Reference calibration (the "app ruler" pattern) — the client marks an
+  // object of known size in the photo and the sign's size is derived from it
+  // client-side. Two shapes: "door" is the guided 4-point outline (the common
+  // case, and the more accurate one since it averages both vertical edges and
+  // tolerates perspective), "custom" is a plain 2-point line for any other
+  // object.
+  const [referenceType, setReferenceType] = useState<"door" | "custom">("door")
+  const [referenceInches, setReferenceInches] = useState<number>(DEFAULT_DOOR_INCHES)
+  // Whether the client actually supplied the reference's real size rather than
+  // accepting the suggested door height. A wrong assumption here skews every
+  // derived dimension by the same percentage while the geometry still looks
+  // perfect, so this is the one error the pixel math cannot detect — it feeds
+  // the confidence tier written to sign_spec.width_confidence.
+  const [referenceInchesEdited, setReferenceInchesEdited] = useState(false)
+  const referenceAssumed = referenceType === "door" && !referenceInchesEdited
   const [reference, setReference] = useState<QuadPoint[] | null>(null)
+  // The 4 door corners tapped via DoorCornerTap — a separate slot from
+  // `reference` (not reused) because `reference`'s existing contract is
+  // specifically QuadSelector's own shape-drag output; conflating the two
+  // would let a future reader assume `reference` always came from that
+  // component. Only ever set while referenceType === "door"; the old
+  // scalar-calibration path (computeSignDimensions via `reference`) stays
+  // live for referenceType === "custom".
+  const [doorCorners, setDoorCorners] = useState<QuadPoint[] | null>(null)
+  // Non-null only when the current photo+quad came from ARMeasureCapture's
+  // WebXR tap-4-corners flow — its presence IS the "this is an AR order"
+  // flag, read below to (a) build a SignDimensions branch with its own
+  // "ar_measurement" provenance rather than reusing the typed-number
+  // "client_provided" branch, which would misreport where the number came
+  // from, (b) skip the sizeQuestion/explain/placement reference sub-steps,
+  // since AR already knows the size, and (c) omit the reference_* fields
+  // from the submitted sign_spec, since there is no reference object. Reset
+  // to null any time the photo is replaced by a non-AR capture.
+  const [arMeasurement, setArMeasurement] = useState<{ widthInches: number; heightInches: number; squareness: number } | null>(null)
   const [imgDims, setImgDims] = useState<{ w: number; h: number } | null>(null)
   const [previewOptions, setPreviewOptions] = useState<string[]>([])
+  // AI-reported color(s) per preview variant, parallel to previewOptions —
+  // only populated when logoColorMatch is true (see SignSpec.logo_color_match_hex).
+  // Best-effort: read off a photo, not a real swatch lookup.
+  const [previewColorReports, setPreviewColorReports] = useState<({ letters?: string; panel?: string } | null)[]>([])
   const [selectedPreviewIdx, setSelectedPreviewIdx] = useState<number>(0)
   const [previewSkipped, setPreviewSkipped] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [generateError, setGenerateError] = useState<string | null>(null)
 
   const previewDataUrl = previewOptions[selectedPreviewIdx] ?? null
+  const previewColorReport = previewColorReports[selectedPreviewIdx] ?? null
   const [submitting, startSubmit] = useTransition()
   const [submitError, setSubmitError] = useState<string | null>(null)
 
@@ -219,7 +272,6 @@ export default function OrderNewClient() {
   const [loginPassword, setLoginPassword] = useState("")
   const [loginError, setLoginError] = useState<string | null>(null)
   const [loginSubmitting, setLoginSubmitting] = useState(false)
-  const logoColorCacheRef = useRef<{ url: string; color: string } | null>(null)
 
   // Sign spec fields
   const [signMaterial, setSignMaterial] = useState<"acrylic" | "aluminum">("acrylic") // cheaper default
@@ -229,8 +281,6 @@ export default function OrderNewClient() {
   // Client-confirmed: does the uploaded logo already render the business name?
   // If so, we show logo-only (never duplicate the name on the sign).
   const [logoIncludesName, setLogoIncludesName] = useState(false)
-  const [logoAnalysis, setLogoAnalysis] = useState<LogoAnalysis | null>(null)
-  const [logoAnalyzing, setLogoAnalyzing] = useState(false)
   const [primaryColor, setPrimaryColor] = useState("#1C1C1C") // letter color
   const [secondaryColor, setSecondaryColor] = useState("")
   const [notes, setNotes] = useState("")
@@ -290,6 +340,15 @@ export default function OrderNewClient() {
     return "front-lid" // default fallback
   })()
 
+  // Feature-detect WebXR AR measurement once on mount — resolves false (never
+  // throws) on any device without it, which is the overwhelming majority, so
+  // this stays a no-op there. See arSupported's own comment above.
+  useEffect(() => {
+    let cancelled = false
+    isARMeasureSupported().then(supported => { if (!cancelled) setArSupported(supported) })
+    return () => { cancelled = true }
+  }, [])
+
   // Auto-switch to aluminum when "No lighting" is selected
   useEffect(() => {
     if (isLit === false && signMaterial !== "aluminum") {
@@ -327,6 +386,16 @@ export default function OrderNewClient() {
   const colorSystem: "durabond" | "acrylic" | "awning" =
     isAwning ? "awning" : signMaterial === "aluminum" ? "durabond" : "acrylic"
 
+  // No letter/panel color is asked for here — the sign company color-matches
+  // the uploaded logo exactly instead. Scoped narrowly: lit channel letters
+  // WITH a background panel, or a cabinet light box. Unlit letters, letters
+  // with no panel, see-through light boxes, and awnings keep the normal
+  // manual color picker even with a logo present.
+  const logoColorMatch = !!logoDataUrl && (
+    (signCategory === "letters" && isLit === true && hasBackground) ||
+    (signCategory === "light_box" && lightBoxType === "cabinet")
+  )
+
   const stepIdx = STEPS.indexOf(step)
 
   // logoIncludesName only matters when both a logo and a name are present — if the
@@ -335,79 +404,6 @@ export default function OrderNewClient() {
     logoDataUrl && businessName ? (logoIncludesName ? "logo-only" : "logo-and-text")
     : logoDataUrl               ? "logo-only"
     :                             "text-only"
-
-  function extractDominantColor(dataUrl: string): Promise<string> {
-    return new Promise((resolve) => {
-      const img = document.createElement("img")
-      img.onload = () => {
-        const canvas = document.createElement("canvas")
-        const ctx = canvas.getContext("2d")
-        if (!ctx) { resolve("#1C1C1C"); return }
-        canvas.width = 100; canvas.height = 100
-        ctx.drawImage(img, 0, 0, 100, 100)
-        try {
-          const { data } = ctx.getImageData(0, 0, 100, 100)
-          const colorMap: Record<string, number> = {}
-          for (let i = 0; i < data.length; i += 4) {
-            const r = data[i]!, g = data[i + 1]!, b = data[i + 2]!, a = data[i + 3]!
-            if (a < 128 || (r > 240 && g > 240 && b > 240)) continue
-            const key = `${Math.floor(r / 32) * 32},${Math.floor(g / 32) * 32},${Math.floor(b / 32) * 32}`
-            colorMap[key] = (colorMap[key] ?? 0) + 1
-          }
-          let maxCount = 0, dominant = "28,28,28"
-          for (const [color, count] of Object.entries(colorMap)) {
-            if (count > maxCount) { maxCount = count; dominant = color }
-          }
-          const [rr, gg, bb] = dominant.split(",").map(Number)
-          resolve("#" + [rr, gg, bb].map((x) => (x ?? 0).toString(16).padStart(2, "0")).join(""))
-        } catch { resolve("#1C1C1C") }
-      }
-      img.onerror = () => resolve("#1C1C1C")
-      img.src = dataUrl
-    })
-  }
-
-  // Derive the sign's styling from an uploaded logo:
-  //  • sample the dominant color from the logo
-  //  • if the nearest acrylic swatch is a close enough match → use acrylic with that color
-  //  • otherwise → switch to aluminum (Dura-Bond) with the nearest panel color
-  //    (never use both — one material only)
-  //  • always force a background panel on so the user picks the backdrop color
-  async function applyLogoStyling(logoUrl: string) {
-    let color: string
-    if (logoColorCacheRef.current?.url === logoUrl) {
-      color = logoColorCacheRef.current.color
-    } else {
-      color = await extractDominantColor(logoUrl)
-      logoColorCacheRef.current = { url: logoUrl, color }
-    }
-    setPrimaryColor(color)
-
-    // "No lighting" signs are always Dura-Bond aluminum (see the effect below that
-    // forces signMaterial back to aluminum whenever isLit is false) — decide that
-    // here instead of picking acrylic and letting the effect silently revert it,
-    // so panelFaceColor still ends up matching the logo color either way.
-    if (isLit === false) {
-      setSignMaterial("aluminum")
-      setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
-    } else {
-      // Find the nearest acrylic across ALL finishes (not filtered to current finish).
-      const bestAcrylic = nearestColor(color, ACRYLIC_COLORS)
-      // Threshold: squared RGB distance ~150 per channel on average = 67500.
-      // Below this the acrylic swatch is a credible brand-color match.
-      const ACRYLIC_THRESHOLD = 20000
-      if (colorDistance(color, bestAcrylic.hex) < ACRYLIC_THRESHOLD) {
-        setSignMaterial("acrylic")
-        setAcrylicColor(bestAcrylic)
-      } else {
-        setSignMaterial("aluminum")
-        setPanelFaceColor(nearestColor(color, DURABOND_COLORS))
-      }
-    }
-
-    // Always show a background panel when a logo is present — user must choose color.
-    setHasBackground(true)
-  }
 
   // Colors shown: always include the 12 common + the currently selected color (even if not common)
   const visibleColors = showAllColors
@@ -434,13 +430,16 @@ export default function OrderNewClient() {
     illuminated: isLit !== false,
     fontStyle,
     letterColor: primaryColor,
-    panelFace: colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
-    panelBg: isChannelLetter && hasBackground
+    // No swatch was chosen when logoColorMatch applies — the fabricator reads
+    // colors straight off the logo, so don't hand the prompt a stale default.
+    panelFace: !logoColorMatch && colorSystem === "durabond" ? { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } : null,
+    panelBg: !logoColorMatch && isChannelLetter && hasBackground
       ? { name: panelBgColor.name, code: panelBgColor.code, hex: panelBgColor.hex }
       : null,
     hasBackground: isChannelLetter ? hasBackground : undefined,
     bgMaterial: isChannelLetter && hasBackground ? ("aluminum" as const) : undefined,
-    acrylic: colorSystem === "acrylic" ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
+    acrylic: !logoColorMatch && colorSystem === "acrylic" ? { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } : null,
+    logoColorMatch,
     awningFrame: isAwning ? awningFrame : undefined,
     fabricName: isAwning ? `${awningFabric.name} (Sunbrella ${awningFabric.code})` : undefined,
     awningIllumination: isAwning ? awningIllumination : undefined,
@@ -451,7 +450,7 @@ export default function OrderNewClient() {
     businessName, brandMode, logoDataUrl, computedReferenceId, signCategory, lightBoxType,
     lightingType, isLit, fontStyle, primaryColor, colorSystem, panelFaceColor, isChannelLetter,
     hasBackground, panelBgColor, acrylicColor, isAwning, awningFrame, awningFabric,
-    awningIllumination, isCorner, quad, customPrompt,
+    awningIllumination, isCorner, quad, customPrompt, logoColorMatch,
   ])
   const assembledPrompt = useMemo(() => buildSignPrompt(promptParams), [promptParams])
 
@@ -460,12 +459,28 @@ export default function OrderNewClient() {
   // short to trust (hard minimum gate) — never shown to the client, just
   // used to gate progression and to populate sign_spec on submit.
   const geometryResult = useMemo(
-    () => computeSignDimensions(quad, reference, referenceInches, imgDims, referenceType),
-    [quad, reference, referenceInches, imgDims, referenceType]
+    () => computeSignDimensions(quad, reference, referenceInches, imgDims, referenceType, referenceAssumed),
+    [quad, reference, referenceInches, imgDims, referenceType, referenceAssumed]
   )
   // Distinguishes "haven't marked both yet" from "marked, but line too short" —
   // drives the inline error copy in the quad step.
   const referenceTooShort = !!quad && !!reference && !!imgDims && !geometryResult
+
+  // Door-corner-tap homography — replaces the scalar geometryResult path for
+  // referenceType === "door": a full 4-point projective transform instead of
+  // one global pixels-per-inch scalar, correcting perspective distortion for
+  // any camera angle rather than only when the shot happens to be
+  // perpendicular. See lib/sign-homography.ts.
+  const homographyResult = useMemo(
+    () =>
+      referenceType === "door" && doorCorners
+        ? computeDoorHomographyDimensions(quad, doorCorners, referenceInches, imgDims, referenceAssumed)
+        : null,
+    [referenceType, doorCorners, quad, referenceInches, imgDims, referenceAssumed]
+  )
+  // Same "attempted but rejected" vs. "not attempted yet" distinction
+  // referenceTooShort makes for the old scalar path.
+  const doorHomographyFailed = referenceType === "door" && !!quad && !!doorCorners && !!imgDims && !homographyResult
 
   // When the client already knows their sign's exact size, skip the photo-based
   // measurement entirely and build a SignDimensions from their typed numbers.
@@ -474,7 +489,28 @@ export default function OrderNewClient() {
       ? isPlausibleDimension(knownFrontWidthInches) && isPlausibleDimension(knownSideWidthInches) && isPlausibleDimension(knownHeightInches)
       : isPlausibleDimension(knownWidthInches) && isPlausibleDimension(knownHeightInches)
   )
-  const signDimensions: SignDimensions | null = knownSize
+  // AR takes priority over both other branches — an AR capture never leaves
+  // knownSize/geometryResult in a state that could be mistaken for it (the
+  // sizeQuestion sub-step that sets knownSize is skipped entirely for AR,
+  // and geometryResult needs a `reference` that AR never sets). It gets its
+  // own branch rather than reusing the knownSize/"client_provided" one below
+  // because an AR reading is neither hand-typed nor reference-derived — that
+  // would misreport its provenance to the sign companies quoting against it.
+  // squareness (how close the 4 tapped corners are to a true rectangle) is
+  // the one reliability signal AR gives us about itself, so a sloppy tap
+  // sequence is capped at "medium" confidence and flagged, the same way the
+  // reference-calibration branch (computeConfidence in lib/sign-geometry.ts)
+  // caps confidence on its own uncertain inputs.
+  const signDimensions: SignDimensions | null = arMeasurement
+    ? {
+        widthInches: arMeasurement.widthInches,
+        heightInches: arMeasurement.heightInches,
+        isCorner: false,
+        confidence: arMeasurement.squareness >= 0.9 ? "high" : "medium",
+        angleWarning: arMeasurement.squareness < 0.9,
+        referencesUsed: ["ar_measurement"],
+      }
+    : knownSize
     ? (manualDimensionsValid
         ? {
             widthInches: isCorner ? knownFrontWidthInches + knownSideWidthInches : knownWidthInches,
@@ -486,6 +522,8 @@ export default function OrderNewClient() {
             referencesUsed: ["client_provided"],
           }
         : null)
+    : referenceType === "door"
+    ? homographyResult
     : geometryResult
 
   // Once real dimensions are known (typed, reference-calibrated, or later a
@@ -516,6 +554,20 @@ export default function OrderNewClient() {
   }, [quad])
 
   useEffect(() => {
+    // Door-homography path: skip entirely. fitQuadToRatio assumes the quad's
+    // ON-SCREEN (image-space) width:height ratio directly reflects its
+    // real-world ratio — true for the old scalar method, but not for a
+    // homography, whose whole point is that a projective transform can map
+    // an arbitrarily-shaped on-screen quad to the correct real-world size
+    // without the two ratios matching. Running this anyway created a live
+    // feedback loop: fitting the quad to homographyResult's ratio changes
+    // `quad`, which changes homographyResult's own ratio (computed via the
+    // projective inverse, not image-space distance), which never converges —
+    // an infinite re-render loop. There's also no need for it: the door path
+    // never re-shows the sign quad for interaction after "area" (see the
+    // dedicated DoorCornerTap screen above), so nothing needs its on-screen
+    // shape corrected.
+    if (referenceType === "door") return
     if (!signDimensions || !quad || !imgDims) return
     if (!(signDimensions.heightInches > 0)) return // guard against a NaN ratio key from a degenerate measurement
     const ratioKey = signDimensions.isCorner
@@ -528,7 +580,7 @@ export default function OrderNewClient() {
       : fitQuadToRatio(quad, aspect, signDimensions.widthInches, signDimensions.heightInches, false)
     lastSnappedRatioKeyRef.current = ratioKey
     setQuadSnapTrigger(fitted)
-  }, [signDimensions, quad, imgDims, isCorner])
+  }, [signDimensions, quad, imgDims, isCorner, referenceType])
 
   async function handleGuestSubmit() {
     const name = guestName.trim()
@@ -593,6 +645,7 @@ export default function OrderNewClient() {
     setGenerating(true)
     setGenerateError(null)
     setPreviewOptions([])
+    setPreviewColorReports([])
     setSelectedPreviewIdx(0)
     setPreviewSkipped(false)
 
@@ -636,11 +689,17 @@ export default function OrderNewClient() {
           continue
         }
         consecutiveNetworkErrors = 0
-        const sData = await sRes.json().catch(() => ({})) as { status?: string; previewUrls?: string[]; error?: string }
+        const sData = await sRes.json().catch(() => ({})) as {
+          status?: string
+          previewUrls?: string[]
+          previewColors?: ({ letters?: string; panel?: string } | null)[]
+          error?: string
+        }
         if (sData.status === "done") {
           const urls = sData.previewUrls ?? []
           if (urls.length === 0) throw new Error("No previews were generated. Please try again.")
           setPreviewOptions(urls)
+          setPreviewColorReports(sData.previewColors ?? [])
           return
         }
         if (sData.status === "error") {
@@ -672,7 +731,19 @@ export default function OrderNewClient() {
     !(needsInstallation === true && coiRequired === "yes" && coiAmount == null)
 
   function handleSubmit() {
-    if (!photoDataUrl || !quad || !signDimensions || (!reference && !knownSize) || !hasBrandInput || !requirementsComplete) return
+    if (!photoDataUrl || !quad || !signDimensions || (!reference && !doorCorners && !knownSize && !arMeasurement) || !hasBrandInput || !requirementsComplete) return
+    // Self-install orders have no professional site visit to catch a bad
+    // photo-based estimate before installation — unlike the SC-install path,
+    // where the company remeasures on-site before production, here the
+    // client's own measurement has to BE the final number. This is a hard
+    // guard independent of which measurement UI was used to get here (photo
+    // reference, door homography, or AR), not just a step-ordering nudge —
+    // needsInstallation is only asked later, at review, so nothing earlier
+    // in the flow can enforce this by construction.
+    if (needsInstallation === false && !knownSize) {
+      setSubmitError("Since you're installing this yourself, we need your own exact measurement — enter it in the box above before submitting.")
+      return
+    }
     setSubmitError(null)
 
     const signSpec: SignSpec = {
@@ -695,10 +766,19 @@ export default function OrderNewClient() {
       image_aspect_ratio: imgDims ? imgDims.w / imgDims.h : undefined,
       // reference style derived from the sign-type / lighting choices
       reference_style: computedReferenceId,
-      // Reference-line calibration used to compute the size above
-      reference_type: referenceType,
-      reference_inches: referenceInches,
-      reference_line: reference ?? undefined,
+      // Reference-line calibration used to compute the size above — omitted
+      // entirely for an AR measurement, which has no reference object at
+      // all. Leaving these set on an AR order would persist a meaningless
+      // default door height (reference_inches) that was never actually used.
+      ...(!arMeasurement && {
+        reference_type: referenceType,
+        reference_inches: referenceInches,
+        // reference (custom ruler/outline mode) and doorCorners (the new
+        // tap-4-corners homography mode) are mutually exclusive — only one is
+        // ever set for a given order, matching reference_line's own existing
+        // shape (2-point ruler mode or 4-point [TL,TR,BR,BL] door mode).
+        reference_line: reference ?? doorCorners ?? undefined,
+      }),
       ...(isCorner && {
         is_corner: true,
         front_width_inches: signDimensions.frontWidthInches,
@@ -710,11 +790,16 @@ export default function OrderNewClient() {
       }),
       brand_mode: brandMode,
       ...(logoDataUrl && businessName && { logo_includes_name: logoIncludesName }),
-      ...(logoAnalysis && { logo_analysis: logoAnalysis }),
       ...(!isAwning && { font_style: fontStyle }),
+      ...(logoColorMatch && { logo_color_match: true }),
+      // AI-reported hex(es) for the preview variant the client actually picked
+      // — the only concrete color data on file when no swatch was chosen.
+      // Best-effort: omitted entirely if that generation never returned one
+      // (preview is best-effort and can fail without blocking the order).
+      ...(logoColorMatch && previewColorReport && { logo_color_match_hex: previewColorReport }),
       ...(isChannelLetter && {
         has_background: hasBackground,
-        ...(hasBackground && {
+        ...(hasBackground && !logoColorMatch && {
           bg_material: "aluminum" as const,
           panel_bg_color: {
             name: panelBgColor.name, code: panelBgColor.code, hex: panelBgColor.hex,
@@ -722,11 +807,11 @@ export default function OrderNewClient() {
         }),
       }),
       ...(colorSystem === "durabond" && {
-        panel_face_color: { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex },
+        ...(!logoColorMatch && { panel_face_color: { name: panelFaceColor.name, code: panelFaceColor.code, hex: panelFaceColor.hex } }),
         channel_lighting: { type: lightingType },
       }),
       ...(colorSystem === "acrylic" && {
-        acrylic_color:    { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish },
+        ...(!logoColorMatch && { acrylic_color: { name: acrylicColor.name, code: acrylicColor.code, hex: acrylicColor.hex, finish: acrylicColor.finish } }),
         channel_lighting: { type: lightingType },
       }),
       // Job requirements (installation + insurance)
@@ -799,18 +884,18 @@ export default function OrderNewClient() {
       {step === "photo" && (
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold">Upload a photo of your storefront</h1>
+            <h1 className="text-2xl font-semibold">Upload a photo of your storefront</h1>
             <p className="text-muted-foreground mt-1">We use it to measure your sign area and show you an AI preview before any company sees your order.</p>
           </div>
           {photoDataUrl ? (
             <div className="space-y-3">
-              <div className="relative rounded-xl overflow-hidden border border-border">
+              <div className="relative rounded-2xl overflow-hidden border border-border">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img src={photoDataUrl} alt="Storefront" className="w-full" />
               </div>
               <button
                 type="button"
-                onClick={() => { setPhotoDataUrl(null); setCaptureMode("upload"); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }}
+                onClick={() => { setPhotoDataUrl(null); setCaptureMode("upload"); setQuad(null); setReference(null); setDoorCorners(null); setImgDims(null); setPreviewOptions([]); setPreviewColorReports([]); setLogoDataUrl(null); setArMeasurement(null) }}
                 className="py-3 text-xs text-muted-foreground hover:text-foreground underline"
               >
                 Use a different photo
@@ -818,11 +903,14 @@ export default function OrderNewClient() {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-2 gap-2">
+              {/* A third "Measure with AR" tile only ever renders once arSupported
+                  resolves true — on every other device this stays a 2-up grid,
+                  identical to before AR existed. */}
+              <div className={`grid gap-2 ${arSupported ? "grid-cols-3" : "grid-cols-2"}`}>
                 <button
                   type="button"
                   onClick={() => setCaptureMode("upload")}
-                  className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
+                  className={`text-left rounded-2xl border-2 px-4 py-3 transition-all ${
                     captureMode === "upload" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
                   }`}
                 >
@@ -832,28 +920,61 @@ export default function OrderNewClient() {
                 <button
                   type="button"
                   onClick={() => setCaptureMode("live")}
-                  className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
+                  className={`text-left rounded-2xl border-2 px-4 py-3 transition-all ${
                     captureMode === "live" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
                   }`}
                 >
                   <span className="block text-sm font-semibold">Use my camera now</span>
                   <span className="block text-xs text-muted-foreground mt-0.5">At the storefront right now — we'll guide you</span>
                 </button>
+                {arSupported && (
+                  <button
+                    type="button"
+                    onClick={() => setCaptureMode("ar")}
+                    className={`text-left rounded-2xl border-2 px-4 py-3 transition-all ${
+                      captureMode === "ar" ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
+                    }`}
+                  >
+                    <span className="block text-sm font-semibold">Measure with AR</span>
+                    <span className="block text-xs text-muted-foreground mt-0.5">Tap the sign&apos;s corners — we&apos;ll get the exact size</span>
+                  </button>
+                )}
               </div>
-              {captureMode === "live" ? (
+              <PhoneHandoff />
+              {captureMode === "ar" ? (
+                <ARMeasureCapture
+                  onCapture={({ dataUrl, quad: arQuad, widthInches, heightInches, squareness }) => {
+                    setPhotoDataUrl(dataUrl)
+                    setQuad(arQuad)
+                    setReference(null)
+                    setDoorCorners(null)
+                    setImgDims(null)
+                    setPreviewOptions([])
+                    setPreviewColorReports([])
+                    setLogoDataUrl(null)
+                    setArMeasurement({ widthInches, heightInches, squareness })
+                    // Push the tapped quad into QuadSelector the moment it mounts on
+                    // the quad step — the same one-shot channel the ratio-lock snap
+                    // below uses. Without this the client would see QuadSelector's
+                    // generic centered default box instead of what they just measured.
+                    setQuadSnapTrigger(arQuad)
+                  }}
+                  onCancel={() => setCaptureMode("upload")}
+                />
+              ) : captureMode === "live" ? (
                 <VideoRulerCapture
-                  onCapture={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }}
+                  onCapture={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setDoorCorners(null); setImgDims(null); setPreviewOptions([]); setPreviewColorReports([]); setLogoDataUrl(null); setArMeasurement(null) }}
                   onCancel={() => setCaptureMode("upload")}
                 />
               ) : (
-                <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setImgDims(null); setPreviewOptions([]); setLogoDataUrl(null) }} />
+                <PhotoUpload onPhoto={(url) => { setPhotoDataUrl(url); setQuad(null); setReference(null); setDoorCorners(null); setImgDims(null); setPreviewOptions([]); setPreviewColorReports([]); setLogoDataUrl(null); setArMeasurement(null) }} />
               )}
             </>
           )}
           {photoDataUrl && (
             <button
               onClick={() => setStep("quad")}
-              className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 transition-opacity"
+              className="w-full bg-accent text-accent-foreground rounded-2xl py-3 font-semibold hover:opacity-90 transition-opacity"
             >
               Continue → Mark where the sign goes
             </button>
@@ -866,15 +987,18 @@ export default function OrderNewClient() {
         <div className="space-y-6">
           {quadSubStep === "area" && (
             <div>
-              <h1 className="text-2xl font-bold">Mark where your sign will go</h1>
+              <h1 className="text-2xl font-semibold">Mark where your sign will go</h1>
               <p className="text-muted-foreground mt-1">Drag the corners of the gold box to outline the sign area — or drag anywhere inside it to move the whole box at once.</p>
             </div>
           )}
 
-          {/* Corner toggle — hidden when perpendicular (blade signs can't wrap a corner).
+          {/* Corner toggle — hidden when perpendicular (blade signs can't wrap a corner)
+              or when the current measurement came from AR (ARMeasureCapture only ever
+              taps 4 corners of a single flat wall, so there's no second face to fold
+              into and nothing to re-measure if this were toggled on).
               Only relevant while marking the area, but stays mounted (just visually
               hidden) the rest of this step so its own state never resets. */}
-          <div className={quadSubStep === "area" && !isPerpendicular ? "" : "hidden"}>
+          <div className={quadSubStep === "area" && !isPerpendicular && !arMeasurement ? "" : "hidden"}>
             <label className="flex items-center gap-3 rounded-lg border border-border px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors">
               <input
                 type="checkbox"
@@ -895,39 +1019,39 @@ export default function OrderNewClient() {
           {/* QuadSelector stays mounted for the whole step (never conditionally
               unmounted) so its internal quad/reference drag state survives moving
               between sub-steps — only its visibility toggles. It's needed again on
-              the "placement" screen, after the size/reference questions below. */}
-          <div className={quadSubStep === "area" || quadSubStep === "placement" ? "" : "hidden"}>
+              the "placement" screen, after the size/reference questions below —
+              except for referenceType === "door", where "placement" instead shows
+              a dedicated DoorCornerTap screen below (a focused single-purpose
+              capture, not this canvas's combined sign-quad + reference-outline
+              view — see DoorCornerTap's own module doc for why). */}
+          <div className={quadSubStep === "area" || (quadSubStep === "placement" && referenceType === "custom") ? "" : "hidden"}>
+            {/* lockedAspectRatio/lockedFrontRatio/lockedSideRatio below are gated to
+                quadSubStep === "placement" only. Locking replaces free 4-corner
+                dragging with resize/rotate-only handles — necessary there, since the
+                box's own shape IS the reference-calibration measurement, so an
+                off-ratio box would silently corrupt it. On "area" the box is just
+                rough placement (typed/AR dimensions don't come from its shape at all,
+                and quadSnapTrigger below already re-fits it to the correct ratio the
+                moment signDimensions changes), so corners stay freely draggable there
+                in both flat and corner mode. */}
             <QuadSelector
               imageDataUrl={photoDataUrl}
               corner={isCorner}
               onChange={(q) => setQuad(q)}
               onReferenceChange={(r) => setReference(r)}
               onImageLoad={(w, h) => setImgDims({ w, h })}
-              referenceLabel={(() => {
-                const preset = REFERENCE_PRESETS.find(r => r.id === referenceType)
-                if (!preset || preset.inches === null) return "Reference"
-                // Strip any parenthetical (e.g. '(80")') from the label
-                return preset.label.replace(/\s*\(.*?\)\s*$/, "").trim()
-              })()}
-              referenceIcon={referenceType === "door" ? "door" : referenceType === "brick" ? "brick" : "ruler"}
+              referenceLabel="Reference"
+              referenceIcon="ruler"
               showReference={quadSubStep === "placement"}
-              lockedAspectRatio={!isCorner && signDimensions ? signDimensions.widthInches / signDimensions.heightInches : undefined}
-              lockedFrontRatio={isCorner && signDimensions && signDimensions.frontWidthInches ? signDimensions.frontWidthInches / signDimensions.heightInches : undefined}
-              lockedSideRatio={isCorner && signDimensions && signDimensions.sideWidthInches ? signDimensions.sideWidthInches / signDimensions.heightInches : undefined}
+              lockedAspectRatio={quadSubStep === "placement" && !isCorner && signDimensions ? signDimensions.widthInches / signDimensions.heightInches : undefined}
+              lockedFrontRatio={quadSubStep === "placement" && isCorner && signDimensions && signDimensions.frontWidthInches ? signDimensions.frontWidthInches / signDimensions.heightInches : undefined}
+              lockedSideRatio={quadSubStep === "placement" && isCorner && signDimensions && signDimensions.sideWidthInches ? signDimensions.sideWidthInches / signDimensions.heightInches : undefined}
               applyQuad={quadSnapTrigger}
-              caption={quadSubStep === "placement" ? (
-                referenceType === "door" ? "Drag anywhere to move the door, or drag a corner to match its exact shape and height."
-                : referenceType === "brick" ? "Drag anywhere to move the outline, or drag a corner to match the brick row's exact shape and height."
-                : "Drag anywhere to move it, or drag a corner to match your reference object's exact shape and size."
-              ) : undefined}
+              caption={quadSubStep === "placement" ? "Drag anywhere to move it, or drag either end to match your reference object's exact length." : undefined}
             />
             {quadSubStep === "placement" && referenceTooShort && (
-              <p className="text-sm text-red-600 mt-2">
-                {referenceType === "door"
-                  ? "The door outline is too small to measure from — stretch it to match the full height of the door."
-                  : referenceType === "brick"
-                  ? "The brick outline is too small to measure from — stretch it to span a full row of bricks."
-                  : "The measurement line is too short — drag the ends further apart so we can calculate the scale."}
+              <p className="text-sm text-destructive mt-2">
+                The measurement line is too short — drag the ends further apart so we can calculate the scale.
               </p>
             )}
             {quadSubStep === "placement" && geometryResult && (
@@ -937,27 +1061,60 @@ export default function OrderNewClient() {
             )}
           </div>
 
+          {/* Dedicated door-corner-tap screen — replaces the combined
+              QuadSelector view above for referenceType === "door". A focused
+              single-purpose capture (just the photo + 4 door pins) rather than
+              showing the sign quad and the reference simultaneously; the sign
+              quad was already drawn during "area" and doesn't need further
+              interaction here. */}
+          {quadSubStep === "placement" && referenceType === "door" && photoDataUrl && imgDims && (
+            <div>
+              <DoorCornerTap
+                imageDataUrl={photoDataUrl}
+                imgDims={imgDims}
+                onCorners={(c) => setDoorCorners(c)}
+              />
+              {doorHomographyFailed && (
+                <p className="text-sm text-destructive mt-2">
+                  Those corners don&apos;t line up as a real door — try dragging them further apart, or check they&apos;re not all bunched together.
+                </p>
+              )}
+              {homographyResult && (
+                <p className="text-sm text-green-700 flex items-center gap-1.5 mt-2">
+                  <span>✓</span> Lined up — we can calculate your sign&apos;s size
+                </p>
+              )}
+              {homographyResult && referenceAssumed && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  This size is a pricing estimate, not accurate enough for production — it&apos;ll be confirmed with an exact measurement (yours or the sign company&apos;s, depending on who installs) before anything is built.
+                </p>
+              )}
+            </div>
+          )}
+
           {quadSubStep === "sizeQuestion" && (
             <div className="space-y-4">
               <div>
-                <h1 className="text-2xl font-bold">Do you know your sign's exact size?</h1>
-                <p className="text-muted-foreground mt-1">If not, we'll walk you through measuring it from your photo — no tape measure needed.</p>
+                <h1 className="text-2xl font-semibold">Do you know your sign's exact size?</h1>
+                <p className="text-muted-foreground mt-1">
+                  If you&apos;re at the storefront, measuring the wall with a tape measure takes 30 seconds and gives the most accurate quotes. If you can&apos;t, we&apos;ll work it out from your photo instead.
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
                   onClick={() => { setKnownSize(true); setSizeQuestionAnswered(true) }}
-                  className={`text-left rounded-xl border-2 p-4 transition-all ${
+                  className={`text-left rounded-2xl border-2 p-4 transition-all ${
                     sizeQuestionAnswered && knownSize ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
                   }`}
                 >
                   <span className="block text-sm font-semibold">Yes, I know it</span>
-                  <span className="block text-xs text-muted-foreground mt-1">I'll type the width and height.</span>
+                  <span className="block text-xs text-muted-foreground mt-1">Most accurate — I&apos;ll type the width and height.</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => { setKnownSize(false); setSizeQuestionAnswered(true) }}
-                  className={`text-left rounded-xl border-2 p-4 transition-all ${
+                  className={`text-left rounded-2xl border-2 p-4 transition-all ${
                     sizeQuestionAnswered && !knownSize ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
                   }`}
                 >
@@ -965,6 +1122,8 @@ export default function OrderNewClient() {
                   <span className="block text-xs text-muted-foreground mt-1">We'll use something in your photo to figure it out.</span>
                 </button>
               </div>
+
+              <MeasureAppNudge onChooseMeasure={() => { setKnownSize(true); setSizeQuestionAnswered(true) }} />
 
               {sizeQuestionAnswered && knownSize && (
                 <div>
@@ -1044,7 +1203,7 @@ export default function OrderNewClient() {
                     </div>
                   )}
                   {!manualDimensionsValid && (
-                    <p className="text-xs text-red-600 mt-2">
+                    <p className="text-xs text-destructive mt-2">
                       {isCorner
                         ? "Enter the front width, side width, and height to continue."
                         : "Enter the width and height to continue."}
@@ -1058,46 +1217,81 @@ export default function OrderNewClient() {
           {quadSubStep === "explain" && (
             <div className="space-y-4">
               <div>
-                <h1 className="text-2xl font-bold">Here's how we'll measure it</h1>
+                <h1 className="text-2xl font-semibold">Here's how we'll measure it</h1>
                 <p className="text-muted-foreground mt-1">
-                  We compare your sign area to something in the photo whose real size we already know — like a standard door (80" tall) or a single row of bricks (8" tall). That gives us a scale to convert your sign's size to exact inches, no special equipment needed.
+                  We compare your sign area to something in the photo whose real size we know. That gives us the scale to convert everything else into inches.
                 </p>
               </div>
+
+              {/* A tape measure beats anything we can do from a photo, so anyone
+                  who can measure is pointed at that instead of this flow. */}
+              <div className="rounded-2xl border border-accent/40 bg-accent/5 p-4">
+                <p className="text-sm font-semibold">Standing at your storefront?</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Measuring the wall with a tape measure — or your phone&apos;s built-in Measure app — takes about 30 seconds and is far more accurate than anything we can work out from a photo.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => { setKnownSize(true); setSizeQuestionAnswered(true); setQuadSubStep("sizeQuestion") }}
+                  className="mt-2 text-xs font-medium text-accent underline"
+                >
+                  I&apos;ll measure it and type the numbers →
+                </button>
+              </div>
+
               <div>
-                <label className="block text-sm font-medium mb-2">Is a door or brick wall visible in your photo?</label>
-                <div className="grid grid-cols-1 gap-2">
-                  {REFERENCE_PRESETS.map(r => (
-                    <button
-                      key={r.id}
-                      type="button"
-                      onClick={() => {
-                        setReferenceType(r.id)
-                        if (r.inches != null) setReferenceInches(r.inches)
-                      }}
-                      className={`text-left rounded-xl border-2 px-4 py-3 transition-all ${
-                        referenceType === r.id ? "border-accent bg-accent/10" : "border-border hover:border-accent/40"
-                      }`}
-                    >
-                      <span className="block text-sm font-semibold">
-                        {r.id === "door" ? "Yes, a door" : r.id === "brick" ? "Yes, a brick wall" : "Neither — I'll mark something else"}
-                      </span>
-                      <span className="block text-xs text-muted-foreground mt-0.5">{r.label}</span>
-                    </button>
-                  ))}
-                </div>
-                {referenceType === "custom" && (
+                <label className="block text-sm font-medium mb-1">
+                  {referenceType === "door" ? "How tall is your entrance door?" : "How long is the object you'll mark?"}
+                </label>
+                <p className="text-xs text-muted-foreground mb-2">
+                  {referenceType === "door"
+                    ? "This one number sets the scale for everything else, so it's worth measuring if you can."
+                    : "Pick something you know the exact size of, and mark it near the sign area."}
+                </p>
+                <div className="flex items-center gap-2">
                   <input
                     type="number"
                     inputMode="decimal"
                     min={1}
                     max={MAX_REFERENCE_INCHES}
-                    value={referenceInches}
-                    onChange={e => setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)}
-                    placeholder="Length in inches (e.g. 36)"
-                    className="mt-2 w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                    value={referenceInches || ""}
+                    onChange={e => {
+                      setReferenceInches(e.target.value ? parseFloat(e.target.value) : 0)
+                      setReferenceInchesEdited(true)
+                    }}
+                    placeholder={referenceType === "door" ? "e.g. 80" : "e.g. 36"}
+                    className="w-32 rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                   />
+                  <span className="text-sm text-muted-foreground">inches</span>
+                </div>
+                {referenceAssumed && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Using {DEFAULT_DOOR_INCHES}&quot; as an estimate — that&apos;s standard for most doors, but commercial entrances are often 84&quot; or taller. We&apos;ll flag your size as an estimate unless you measure it.
+                  </p>
                 )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = referenceType === "door" ? "custom" : "door"
+                    setReferenceType(next)
+                    setReference(null)
+                    setDoorCorners(null)
+                    if (next === "door") {
+                      setReferenceInches(DEFAULT_DOOR_INCHES)
+                      setReferenceInchesEdited(false)
+                    } else {
+                      setReferenceInches(0)
+                      setReferenceInchesEdited(false)
+                    }
+                  }}
+                  className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
+                >
+                  {referenceType === "door"
+                    ? "No door in the photo? Mark something else instead →"
+                    : "← Go back to marking a door"}
+                </button>
               </div>
+
               <button
                 type="button"
                 onClick={() => {
@@ -1105,28 +1299,29 @@ export default function OrderNewClient() {
                   setPhotoDataUrl(null)
                   setQuad(null)
                   setReference(null)
+                  setDoorCorners(null)
                   setImgDims(null)
                   setPreviewOptions([])
+                  setPreviewColorReports([])
+                  setArMeasurement(null)
                   setStep("photo")
                 }}
                 className="text-xs text-muted-foreground hover:text-foreground underline"
               >
-                Standing at the storefront right now? Retake with a guided camera →
+                Want to retake the photo with a guided camera? →
               </button>
             </div>
           )}
 
           {quadSubStep === "placement" && (
             <div>
-              <h1 className="text-2xl font-bold">
-                {referenceType === "door" ? "Place the door outline" : referenceType === "brick" ? "Place the brick outline" : "Mark your reference object"}
+              <h1 className="text-2xl font-semibold">
+                {referenceType === "door" ? "Tap the door's corners" : "Mark your reference object"}
               </h1>
               <p className="text-muted-foreground mt-1">
                 {referenceType === "door"
-                  ? "Line it up with a real door in your photo. Drag it anywhere to move it, or drag a corner to match the door's exact shape and height."
-                  : referenceType === "brick"
-                  ? "Line it up with one full row of bricks. Drag it anywhere to move it, or drag a corner to match the row's exact shape and height."
-                  : "Mark any object in the photo whose real size you know — you already told us its length."}
+                  ? `Drag the 4 dots onto the real corners of your entrance door — you told us it's ${referenceInches}" tall, and that height sets the scale, so take your time getting each corner exact.`
+                  : `Mark the object you measured at ${referenceInches}". Drag either end of the line to match it exactly, and pick something close to the sign area.`}
               </p>
             </div>
           )}
@@ -1167,15 +1362,18 @@ export default function OrderNewClient() {
                 else if (quadSubStep === "sizeQuestion") setQuadSubStep("area")
                 else if (quadSubStep === "explain") setQuadSubStep("sizeQuestion")
                 else if (quadSubStep === "placement") setQuadSubStep("explain")
-                else setQuadSubStep(knownSize ? "sizeQuestion" : "placement")
+                else setQuadSubStep(arMeasurement ? "area" : knownSize ? "sizeQuestion" : "placement")
               }}
-              className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50"
+              className="flex-1 border border-border rounded-2xl py-2.5 text-sm font-medium hover:bg-muted/50"
             >
               ← Back
             </button>
             <button
               onClick={() => {
-                if (quadSubStep === "area") setQuadSubStep("sizeQuestion")
+                // AR already knows the size — skip straight past the
+                // sizeQuestion/explain/placement reference sub-steps, which
+                // exist only to derive dimensions this capture already has.
+                if (quadSubStep === "area") setQuadSubStep(arMeasurement ? "mount" : "sizeQuestion")
                 else if (quadSubStep === "sizeQuestion") setQuadSubStep(knownSize ? "mount" : "explain")
                 else if (quadSubStep === "explain") setQuadSubStep("placement")
                 else if (quadSubStep === "placement") setQuadSubStep("mount")
@@ -1183,10 +1381,10 @@ export default function OrderNewClient() {
               }}
               disabled={
                 (quadSubStep === "sizeQuestion" && (!sizeQuestionAnswered || (knownSize && !manualDimensionsValid))) ||
-                (quadSubStep === "placement" && !geometryResult) ||
+                (quadSubStep === "placement" && !signDimensions) ||
                 (quadSubStep === "mount" && !signDimensions)
               }
-              className="flex-2 flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
+              className="flex-2 flex-1 bg-accent text-accent-foreground rounded-2xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               {quadSubStep === "mount" ? "Continue → Sign Details" : "Continue"}
             </button>
@@ -1198,7 +1396,7 @@ export default function OrderNewClient() {
       {step === "customize" && (
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold">Sign details</h1>
+            <h1 className="text-2xl font-semibold">Sign details</h1>
             <p className="text-muted-foreground mt-1">These details go straight to the sign companies — they use them to prepare your quotes.</p>
           </div>
 
@@ -1206,20 +1404,19 @@ export default function OrderNewClient() {
             {/* Logo upload */}
             <div>
               <label className="block text-sm font-medium mb-1">Logo <span className="text-muted-foreground font-normal">(optional)</span></label>
-              <p className="text-xs text-muted-foreground mb-2">PNG with a transparent background works best. We'll pull your brand colors from it automatically.</p>
+              <p className="text-xs text-muted-foreground mb-2">PNG with a transparent background works best. The sign company will color-match fabrication to your logo's real colors.</p>
               {logoDataUrl ? (
                 <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={logoDataUrl} alt="Logo" className="h-10 w-auto object-contain rounded" />
                   <span className="flex-1 text-sm text-foreground font-medium">
-                    {logoAnalyzing ? "Analyzing logo…" : "Logo uploaded"}
+                    Logo uploaded
                   </span>
                   <button
                     type="button"
                     onClick={() => {
                       setLogoDataUrl(null)
                       setLogoIncludesName(false)
-                      setLogoAnalysis(null)
                     }}
                     className="text-xs text-muted-foreground hover:text-foreground"
                   >
@@ -1231,27 +1428,38 @@ export default function OrderNewClient() {
                   <span className="text-2xl">🖼️</span>
                   <div>
                     <p className="text-sm font-medium">Upload your logo</p>
-                    <p className="text-xs text-muted-foreground">PNG, JPG, or SVG</p>
+                    <p className="text-xs text-muted-foreground">PNG, JPG, PDF, or SVG</p>
                   </div>
                   <input
                     type="file"
-                    accept="image/*"
+                    accept="image/*,application/pdf,.pdf"
                     className="sr-only"
                     onChange={async e => {
                       const file = e.currentTarget.files?.[0]
                       if (!file) return
-                      const reader = new FileReader()
-                      reader.onload = async (ev) => {
-                        const url = ev.target?.result as string
-                        setLogoDataUrl(url)
-                        setLogoAnalyzing(true)
-                        await Promise.all([
-                          applyLogoStyling(url),
-                          analyzeLogoComplexity(url).then(r => setLogoAnalysis("error" in r ? null : r)).catch(() => setLogoAnalysis(null)),
-                        ])
-                        setLogoAnalyzing(false)
+
+                      async function readAsDataUrl(f: File): Promise<string> {
+                        return new Promise((resolve, reject) => {
+                          const reader = new FileReader()
+                          reader.onload = ev => resolve(ev.target?.result as string)
+                          reader.onerror = () => reject(reader.error)
+                          reader.readAsDataURL(f)
+                        })
                       }
-                      reader.readAsDataURL(file)
+
+                      let url: string
+                      try {
+                        if (isPdfFile(file)) {
+                          url = await pdfFileToLogoDataUrl(file)
+                        } else {
+                          url = await readAsDataUrl(file)
+                        }
+                      } catch {
+                        toast.error("Couldn't read that logo file — try a PNG, JPG, or PDF.")
+                        return
+                      }
+
+                      setLogoDataUrl(url)
                     }}
                   />
                 </label>
@@ -1268,15 +1476,7 @@ export default function OrderNewClient() {
               <label className="block text-sm font-medium mb-2">Business name on the sign {!logoDataUrl && <span className="text-destructive">*</span>}</label>
               <input
                 value={businessName}
-                onChange={async e => {
-                  setBusinessName(e.target.value)
-                  if (e.target.value && logoDataUrl) {
-                    const color = logoColorCacheRef.current?.url === logoDataUrl
-                      ? logoColorCacheRef.current.color
-                      : await extractDominantColor(logoDataUrl)
-                    setPrimaryColor(color)
-                  }
-                }}
+                onChange={e => setBusinessName(e.target.value)}
                 placeholder="e.g. Joe's Pizza"
                 className="w-full rounded-lg border border-border px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
               />
@@ -1306,7 +1506,7 @@ export default function OrderNewClient() {
             <div>
               <label className="block text-sm font-medium mb-2">What kind of sign? *</label>
               {isPerpendicular ? (
-                <div className="flex items-center gap-4 rounded-xl border border-border px-4 py-3 bg-muted/30">
+                <div className="flex items-center gap-4 rounded-2xl border border-border px-4 py-3 bg-muted/30">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src="/examples/sign-type/Light_box.png"
@@ -1348,16 +1548,6 @@ export default function OrderNewClient() {
             {/* ── LETTERS ── */}
             {signCategory === "letters" && (
               <>
-                {/* Fabrication feasibility hint — logo may be too complex to cut as channel letters */}
-                {logoDataUrl && logoAnalysis && !logoAnalysis.letters_feasible && (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                    <p className="font-medium leading-tight">Your logo may be too detailed for channel letters</p>
-                    <p className="text-xs leading-snug mt-1">
-                      It has {logoAnalysis.distinct_colors}+ colors or fine detail that can&apos;t be cut from flat acrylic.
-                      Consider <span className="font-medium">Light Box</span> instead — it prints your logo exactly as-is.
-                    </p>
-                  </div>
-                )}
 
                 {/* Background panel choice */}
                 <div>
@@ -1385,38 +1575,46 @@ export default function OrderNewClient() {
                 {hasBackground && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Background color</label>
-                    <div className="grid grid-cols-3 gap-3 mb-3">
-                      {[
-                        { color: DURABOND_COLORS.find(c => c.code === "DB-03"), imageSrc: "/examples/background/Letters_White.jpg" },
-                        { color: DURABOND_COLORS.find(c => c.code === "DB-35"), imageSrc: "/examples/background/Letters_Gray.jpg" },
-                        { color: DURABOND_COLORS.find(c => c.code === "DB-13"), imageSrc: "/examples/background/Letters_Black_no light.jpg" },
-                      ].filter(c => c.color).map(({ color: c, imageSrc }) => (
-                        <PictureChoice
-                          key={c!.code}
-                          imageSrc={imageSrc}
-                          label={c!.name}
-                          selected={panelBgColor.code === c!.code}
-                          onClick={() => setPanelBgColor(c!)}
-                        />
-                      ))}
-                    </div>
-                    <details className="text-xs">
-                      <summary className="cursor-pointer font-medium text-accent">Show all aluminum colors</summary>
-                      <div className="grid grid-cols-6 gap-2 mt-2">
-                        {DURABOND_COLORS.map(c => (
-                          <button
-                            key={c.code}
-                            type="button"
-                            onClick={() => setPanelBgColor(c)}
-                            className={`aspect-square rounded-lg border-2 transition-all ${
-                              panelBgColor.code === c.code ? "border-accent scale-105" : "border-border"
-                            }`}
-                            style={{ background: c.hex }}
-                            title={c.name}
-                          />
-                        ))}
+                    {logoColorMatch ? (
+                      <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
+                        <span className="text-sm text-muted-foreground">Will be color-matched to your logo exactly — no need to choose.</span>
                       </div>
-                    </details>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-3 gap-3 mb-3">
+                          {[
+                            { color: DURABOND_COLORS.find(c => c.code === "DB-03"), imageSrc: "/examples/background/Letters_White.jpg" },
+                            { color: DURABOND_COLORS.find(c => c.code === "DB-35"), imageSrc: "/examples/background/Letters_Gray.jpg" },
+                            { color: DURABOND_COLORS.find(c => c.code === "DB-13"), imageSrc: "/examples/background/Letters_Black_no light.jpg" },
+                          ].filter(c => c.color).map(({ color: c, imageSrc }) => (
+                            <PictureChoice
+                              key={c!.code}
+                              imageSrc={imageSrc}
+                              label={c!.name}
+                              selected={panelBgColor.code === c!.code}
+                              onClick={() => setPanelBgColor(c!)}
+                            />
+                          ))}
+                        </div>
+                        <details className="text-xs">
+                          <summary className="cursor-pointer font-medium text-accent">Show all aluminum colors</summary>
+                          <div className="grid grid-cols-6 gap-2 mt-2">
+                            {DURABOND_COLORS.map(c => (
+                              <button
+                                key={c.code}
+                                type="button"
+                                onClick={() => setPanelBgColor(c)}
+                                className={`aspect-square rounded-lg border-2 transition-all ${
+                                  panelBgColor.code === c.code ? "border-accent scale-105" : "border-border"
+                                }`}
+                                style={{ background: c.hex }}
+                                title={c.name}
+                              />
+                            ))}
+                          </div>
+                        </details>
+                      </>
+                    )}
                   </div>
                 )}
 
@@ -1477,26 +1675,32 @@ export default function OrderNewClient() {
                     {/* Letter color (full acrylic palette) */}
                     <div>
                       <label className="block text-sm font-medium mb-2">Letter color</label>
-                      <div className="grid grid-cols-6 gap-2">
-                        {ACRYLIC_COLORS.map(c => (
-                          <button
-                            key={`${c.code}-${c.finish}`}
-                            type="button"
-                            title={`${c.name} #${c.code}`}
-                            onClick={() => { setAcrylicColor(c); setSignMaterial("acrylic"); setPrimaryColor(c.hex) }}
-                            className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
-                              ${primaryColor === c.hex ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
-                          >
-                            <div className="w-full h-full" style={{ background: c.hex, opacity: c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1 }} />
-                            {primaryColor === c.hex && <div className="absolute inset-0 flex items-center justify-center"><span className="text-white text-sm drop-shadow">✓</span></div>}
-                          </button>
-                        ))}
-                      </div>
+                      {logoColorMatch ? (
+                        <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
+                          <span className="text-sm text-muted-foreground">Will be color-matched to your logo exactly — no need to choose.</span>
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-6 gap-2">
+                          {ACRYLIC_COLORS.map(c => (
+                            <button
+                              key={`${c.code}-${c.finish}`}
+                              type="button"
+                              title={`${c.name} #${c.code}`}
+                              onClick={() => { setAcrylicColor(c); setSignMaterial("acrylic"); setPrimaryColor(c.hex) }}
+                              className={`group relative rounded-lg overflow-hidden border-2 transition-all aspect-square
+                                ${primaryColor === c.hex ? "border-accent scale-105 shadow-md" : "border-transparent hover:border-border"}`}
+                            >
+                              <div className="w-full h-full" style={{ background: c.hex, opacity: c.finish === "translucent" ? 0.75 : c.finish === "transparent" ? 0.55 : 1 }} />
+                              {primaryColor === c.hex && <div className="absolute inset-0 flex items-center justify-center"><span className="text-white text-sm drop-shadow">✓</span></div>}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     {/* Advanced: warmth + colorful — dark panel throughout so the
                         light-warmth glow reads correctly against darkness */}
-                    <details className="border border-white/10 bg-zinc-900 rounded-xl overflow-hidden group">
+                    <details className="border border-white/10 bg-zinc-900 rounded-2xl overflow-hidden group">
                       <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium text-white select-none hover:bg-white/5">
                         <span>Advanced lighting settings</span>
                         <span className="text-xs text-white/50 group-open:hidden">show</span>
@@ -1521,7 +1725,8 @@ export default function OrderNewClient() {
                   </>
                 )}
 
-                {/* Letter color (aluminum only, if no light) */}
+                {/* Letter color (aluminum only, if no light) — a logo doesn't
+                    auto-match here: no-light letters keep a manual color pick. */}
                 {isLit === false && (
                   <div>
                     <label className="block text-sm font-medium mb-2">Letter color</label>
@@ -1606,7 +1811,7 @@ export default function OrderNewClient() {
                 </div>
 
 
-                <details className="border border-border rounded-xl overflow-hidden group">
+                <details className="border border-border rounded-2xl overflow-hidden group">
                   <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
                     <span>Advanced settings</span>
                     <span className="text-xs text-muted-foreground group-open:hidden">show</span>
@@ -1631,37 +1836,46 @@ export default function OrderNewClient() {
                   </div>
                 </details>
 
-                <div>
-                  <label className="block text-sm font-medium mb-2">Color</label>
-                  <div className="grid grid-cols-6 gap-2">
-                    {lightBoxType === "cabinet"
-                      ? ACRYLIC_COLORS.map(c => (
-                          <button
-                            key={c.code}
-                            type="button"
-                            onClick={() => { setAcrylicColor(c); setSignMaterial("acrylic"); setPrimaryColor(c.hex) }}
-                            className={`aspect-square rounded-lg border-2 transition-all ${
-                              primaryColor === c.hex ? "border-accent scale-105" : "border-transparent hover:border-border"
-                            }`}
-                            style={{ background: c.hex, opacity: c.finish === "translucent" ? 0.75 : 1 }}
-                            title={c.name}
-                          />
-                        ))
-                      : DURABOND_COLORS.map(c => (
-                          <button
-                            key={c.code}
-                            type="button"
-                            onClick={() => { setPanelFaceColor(c); setSignMaterial("aluminum"); setPrimaryColor(c.hex) }}
-                            className={`aspect-square rounded-lg border-2 transition-all ${
-                              primaryColor === c.hex ? "border-accent scale-105" : "border-transparent hover:border-border"
-                            }`}
-                            style={{ background: c.hex }}
-                            title={c.name}
-                          />
-                        ))
-                    }
+                {logoColorMatch ? (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Color</label>
+                    <div className="flex items-center gap-3 border border-border rounded-lg px-3 py-2 bg-muted/30">
+                      <span className="text-sm text-muted-foreground">Will be color-matched to your logo exactly — no need to choose.</span>
+                    </div>
                   </div>
-                </div>
+                ) : (
+                  <div>
+                    <label className="block text-sm font-medium mb-2">Color</label>
+                    <div className="grid grid-cols-6 gap-2">
+                      {lightBoxType === "cabinet"
+                        ? ACRYLIC_COLORS.map(c => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => { setAcrylicColor(c); setSignMaterial("acrylic"); setPrimaryColor(c.hex) }}
+                              className={`aspect-square rounded-lg border-2 transition-all ${
+                                primaryColor === c.hex ? "border-accent scale-105" : "border-transparent hover:border-border"
+                              }`}
+                              style={{ background: c.hex, opacity: c.finish === "translucent" ? 0.75 : 1 }}
+                              title={c.name}
+                            />
+                          ))
+                        : DURABOND_COLORS.map(c => (
+                            <button
+                              key={c.code}
+                              type="button"
+                              onClick={() => { setPanelFaceColor(c); setSignMaterial("aluminum"); setPrimaryColor(c.hex) }}
+                              className={`aspect-square rounded-lg border-2 transition-all ${
+                                primaryColor === c.hex ? "border-accent scale-105" : "border-transparent hover:border-border"
+                              }`}
+                              style={{ background: c.hex }}
+                              title={c.name}
+                            />
+                          ))
+                      }
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
@@ -1718,7 +1932,7 @@ export default function OrderNewClient() {
                   </button>
                 </div>
 
-                <details className="border border-border rounded-xl overflow-hidden group">
+                <details className="border border-border rounded-2xl overflow-hidden group">
                   <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
                     <span>Frame style (advanced)</span>
                     <span className="text-xs text-muted-foreground group-open:hidden">show</span>
@@ -1755,7 +1969,7 @@ export default function OrderNewClient() {
             </div>
 
             {/* Advanced AI settings — extra instructions fed straight to the preview generator */}
-            <details className="border border-border rounded-xl overflow-hidden group">
+            <details className="border border-border rounded-2xl overflow-hidden group">
               <summary className="flex items-center justify-between cursor-pointer px-4 py-3 text-sm font-medium select-none hover:bg-muted/40">
                 <span>Advanced AI settings</span>
                 <span className="text-xs text-muted-foreground group-open:hidden">show</span>
@@ -1797,13 +2011,13 @@ export default function OrderNewClient() {
           </div>
 
           <div className="flex gap-3">
-            <button onClick={() => setStep("quad")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
+            <button onClick={() => setStep("quad")} className="flex-1 border border-border rounded-2xl py-2.5 text-sm font-medium hover:bg-muted/50">
               ← Back
             </button>
             <button
               onClick={() => { setStep("preview"); runPreview() }}
               disabled={!businessName || !signCategory || (signCategory === "letters" && isLit === null)}
-              className="flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
+              className="flex-1 bg-accent text-accent-foreground rounded-2xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-40 transition-opacity"
             >
               Continue → AI Preview
             </button>
@@ -1813,12 +2027,12 @@ export default function OrderNewClient() {
       {step === "preview" && (
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold">AI sign preview</h1>
+            <h1 className="text-2xl font-semibold">AI sign preview</h1>
             <p className="text-muted-foreground mt-1">Here's how your sign could look on your building — pick the option you like best.</p>
           </div>
 
           {generating && (
-            <div className="border border-border rounded-xl p-12 text-center space-y-3">
+            <div className="border border-border rounded-2xl p-12 text-center space-y-3">
               <div className="text-4xl animate-pulse">🎨</div>
               <p className="font-medium">Generating your preview…</p>
               <p className="text-sm text-muted-foreground">Creating 3 options — this usually takes about 60 seconds.</p>
@@ -1826,7 +2040,7 @@ export default function OrderNewClient() {
           )}
 
           {!generating && previewSkipped && (
-            <div className="border border-border rounded-xl p-8 text-center space-y-3">
+            <div className="border border-border rounded-2xl p-8 text-center space-y-3">
               <div className="text-4xl">📋</div>
               <p className="font-medium">Preview not available</p>
               <p className="text-sm text-muted-foreground">
@@ -1836,9 +2050,9 @@ export default function OrderNewClient() {
           )}
 
           {!generating && generateError && (
-            <div className="border border-red-200 bg-red-50 rounded-xl p-5 space-y-3">
-              <p className="text-sm font-medium text-red-700">Preview couldn't be generated</p>
-              <p className="text-sm text-red-600">{generateError}</p>
+            <div className="border border-destructive/30 bg-destructive/10 rounded-2xl p-5 space-y-3">
+              <p className="text-sm font-medium text-destructive">Preview couldn't be generated</p>
+              <p className="text-sm text-destructive">{generateError}</p>
               <button onClick={runPreview} className="text-sm text-accent font-medium hover:underline">
                 Try again
               </button>
@@ -1853,7 +2067,7 @@ export default function OrderNewClient() {
                   <button
                     key={i}
                     onClick={() => setSelectedPreviewIdx(i)}
-                    className={`relative rounded-xl overflow-hidden border-2 transition-colors text-left ${
+                    className={`relative rounded-2xl overflow-hidden border-2 transition-colors text-left ${
                       selectedPreviewIdx === i
                         ? "border-accent ring-2 ring-accent/30"
                         : "border-border hover:border-accent/50"
@@ -1892,7 +2106,7 @@ export default function OrderNewClient() {
 
           {!generating && (
             <div className="flex gap-3">
-              <button onClick={() => setStep("customize")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
+              <button onClick={() => setStep("customize")} className="flex-1 border border-border rounded-2xl py-2.5 text-sm font-medium hover:bg-muted/50">
                 ← Back
               </button>
               <button
@@ -1903,7 +2117,7 @@ export default function OrderNewClient() {
                   if (previewOptions.length === 0) setPreviewSkipped(true)
                   setStep("review")
                 }}
-                className="flex-1 bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+                className="flex-1 bg-accent text-accent-foreground rounded-2xl py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
               >
                 Continue → Review your order
               </button>
@@ -1916,7 +2130,7 @@ export default function OrderNewClient() {
       {step === "review" && (
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold">Review & submit</h1>
+            <h1 className="text-2xl font-semibold">Review & submit</h1>
             <p className="text-muted-foreground mt-1">
               {previewDataUrl
                 ? "Here's the sign you're ordering — check the details below, then send it out for quotes."
@@ -1932,14 +2146,14 @@ export default function OrderNewClient() {
               <img
                 src={previewDataUrl}
                 alt="Your selected sign preview"
-                className="w-full aspect-video object-cover rounded-xl border border-border"
+                className="w-full rounded-2xl border border-border"
               />
               <p className="text-xs text-muted-foreground mt-1.5">
                 AI-generated preview — your sign company will confirm exact details on-site.
               </p>
             </div>
           ) : previewSkipped ? (
-            <div className="border border-border rounded-xl p-4 text-sm text-muted-foreground bg-muted/30">
+            <div className="border border-border rounded-2xl p-4 text-sm text-muted-foreground bg-muted/30">
               A preview wasn't generated for this order — sign companies will still quote based on the details below.
             </div>
           ) : null}
@@ -2034,7 +2248,7 @@ export default function OrderNewClient() {
             </div>
           )}
 
-          <div className="border border-border rounded-xl divide-y divide-border">
+          <div className="border border-border rounded-2xl divide-y divide-border">
             <Row label="Business name" value={businessName} />
             <Row label="Sign style" value={
               <span className="flex items-center gap-1.5">
@@ -2059,30 +2273,60 @@ export default function OrderNewClient() {
                   <Row label="Font" value={FONT_OPTIONS.find(f => f.id === fontStyle)?.name ?? fontStyle} />
                 )}
                 <Row label="Material" value={SIGN_MATERIALS.find(m => m.value === signMaterial)?.label ?? signMaterial} />
-                {colorSystem === "durabond" && (
-                  <Row label="Letter face" value={
-                    <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelFaceColor.hex }} />
-                      {panelFaceColor.name}
-                    </span>
+                {logoColorMatch ? (
+                  <Row label="Color" value={
+                    previewColorReport ? (
+                      <span className="flex items-center gap-2 flex-wrap">
+                        {previewColorReport.letters && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: previewColorReport.letters }} />
+                            {previewColorReport.letters}
+                          </span>
+                        )}
+                        {previewColorReport.panel && (
+                          <span className="flex items-center gap-1.5">
+                            <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: previewColorReport.panel }} />
+                            {previewColorReport.panel} panel
+                          </span>
+                        )}
+                        <span className="text-xs text-muted-foreground">AI-estimated from your logo — verify before fabrication</span>
+                      </span>
+                    ) : (
+                      <span className="text-accent">Matched to your logo exactly — no swatch chosen</span>
+                    )
                   } />
-                )}
-                {colorSystem === "acrylic" && (
-                  <Row label="Acrylic face" value={
-                    <span className="flex items-center gap-2">
-                      <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: acrylicColor.hex }} />
-                      {acrylicColor.name} #{acrylicColor.code}
-                      <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
-                    </span>
-                  } />
+                ) : (
+                  <>
+                    {colorSystem === "durabond" && (
+                      <Row label="Letter face" value={
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelFaceColor.hex }} />
+                          {panelFaceColor.name}
+                        </span>
+                      } />
+                    )}
+                    {colorSystem === "acrylic" && (
+                      <Row label="Acrylic face" value={
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: acrylicColor.hex }} />
+                          {acrylicColor.name} #{acrylicColor.code}
+                          <span className="text-xs text-accent capitalize">{acrylicColor.finish}</span>
+                        </span>
+                      } />
+                    )}
+                  </>
                 )}
                 {isChannelLetter && (
                   <Row label="Background" value={
                     hasBackground ? (
-                      <span className="flex items-center gap-2">
-                        <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelBgColor.hex }} />
-                        {panelBgColor.name} · aluminum panel
-                      </span>
+                      logoColorMatch ? (
+                        <span className="text-accent">Matched to your logo</span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <span className="w-4 h-4 rounded border border-border inline-block" style={{ background: panelBgColor.hex }} />
+                          {panelBgColor.name} · aluminum panel
+                        </span>
+                      )
                     ) : "Letters only (no panel)"
                   } />
                 )}
@@ -2108,22 +2352,111 @@ export default function OrderNewClient() {
             )}
           </div>
 
-          <div className="border border-border rounded-xl p-4 text-sm text-muted-foreground space-y-1">
+          <div className="border border-border rounded-2xl p-4 text-sm text-muted-foreground space-y-1">
             <p>🕐 Sign companies have <strong>24 hours</strong> to submit quotes.</p>
             <p>💳 You're not charged until you accept a quote.</p>
-            <p>📐 The sign company will measure on-site before making your sign.</p>
+            {needsInstallation === true && <p>📐 The sign company will measure on-site before making your sign.</p>}
           </div>
 
-          {submitError && <p className="text-sm text-red-600">{submitError}</p>}
+          {/* Self-install has no professional site visit to catch a bad
+              photo-based estimate before installation, so the client's own
+              measurement has to BE the final number (see handleSubmit's
+              matching hard guard). Fixable right here instead of sending the
+              client back to an earlier step — same fields, same state, as
+              the "Yes, I know it" input on the size-question step. */}
+          {needsInstallation === false && !knownSize && (
+            <div className="border border-destructive/40 bg-destructive/5 rounded-2xl p-4 space-y-3">
+              <p className="text-sm text-destructive">
+                Since you&apos;re installing this yourself, we need your own exact measurement — the estimate from your photo isn&apos;t accurate enough to fabricate from.
+              </p>
+              {isCorner ? (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Front width (inches)</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        max={MAX_SIGN_DIMENSION_INCHES}
+                        value={knownFrontWidthInches || ""}
+                        onChange={e => { setKnownFrontWidthInches(e.target.value ? parseFloat(e.target.value) : 0); setKnownSize(true) }}
+                        placeholder="e.g. 60"
+                        className="w-full rounded-lg border border-border px-3 py-3 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium mb-1">Side width (inches)</label>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min={0}
+                        max={MAX_SIGN_DIMENSION_INCHES}
+                        value={knownSideWidthInches || ""}
+                        onChange={e => { setKnownSideWidthInches(e.target.value ? parseFloat(e.target.value) : 0); setKnownSize(true) }}
+                        placeholder="e.g. 36"
+                        className="w-full rounded-lg border border-border px-3 py-3 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Height (inches)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={MAX_SIGN_DIMENSION_INCHES}
+                      value={knownHeightInches || ""}
+                      onChange={e => { setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0); setKnownSize(true) }}
+                      placeholder="e.g. 24"
+                      className="w-full rounded-lg border border-border px-3 py-3 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Width (inches)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={MAX_SIGN_DIMENSION_INCHES}
+                      value={knownWidthInches || ""}
+                      onChange={e => { setKnownWidthInches(e.target.value ? parseFloat(e.target.value) : 0); setKnownSize(true) }}
+                      placeholder="e.g. 60"
+                      className="w-full rounded-lg border border-border px-3 py-3 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium mb-1">Height (inches)</label>
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      min={0}
+                      max={MAX_SIGN_DIMENSION_INCHES}
+                      value={knownHeightInches || ""}
+                      onChange={e => { setKnownHeightInches(e.target.value ? parseFloat(e.target.value) : 0); setKnownSize(true) }}
+                      placeholder="e.g. 24"
+                      className="w-full rounded-lg border border-border px-3 py-3 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-accent"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {submitError && <p className="text-sm text-destructive">{submitError}</p>}
 
           <div className="flex gap-3">
-            <button onClick={() => setStep("preview")} className="flex-1 border border-border rounded-xl py-2.5 text-sm font-medium hover:bg-muted/50">
+            <button onClick={() => setStep("preview")} className="flex-1 border border-border rounded-2xl py-2.5 text-sm font-medium hover:bg-muted/50">
               ← Back
             </button>
             <button
               onClick={handleSubmit}
               disabled={submitting || !requirementsComplete}
-              className="flex-1 bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              className="rounded-full flex-1 text-white py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+              style={{ backgroundImage: "var(--gradient-brand)" }}
             >
               {submitting ? "Submitting…" : "Submit for Quotes →"}
             </button>
@@ -2151,7 +2484,7 @@ export default function OrderNewClient() {
                       onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
                       placeholder="Jane Smith"
                       autoFocus
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-2xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
                   <div>
@@ -2162,7 +2495,7 @@ export default function OrderNewClient() {
                       onChange={e => setGuestEmail(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
                       placeholder="jane@example.com"
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-2xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
                   <div>
@@ -2173,14 +2506,14 @@ export default function OrderNewClient() {
                       onChange={e => setGuestPhone(e.target.value)}
                       onKeyDown={e => e.key === "Enter" && handleGuestSubmit()}
                       placeholder="(555) 123-4567"
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-2xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
-                  {guestError && <p className="text-sm text-red-600">{guestError}</p>}
+                  {guestError && <p className="text-sm text-destructive">{guestError}</p>}
                   <button
                     onClick={handleGuestSubmit}
                     disabled={guestSubmitting}
-                    className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="w-full bg-accent text-accent-foreground rounded-2xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
                   >
                     {guestSubmitting ? "Setting up…" : "Generate my preview"}
                   </button>
@@ -2216,7 +2549,7 @@ export default function OrderNewClient() {
                       placeholder="jane@example.com"
                       autoFocus
                       autoComplete="email"
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-2xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
                   <div>
@@ -2228,14 +2561,14 @@ export default function OrderNewClient() {
                       onKeyDown={e => e.key === "Enter" && handleInlineLogin()}
                       placeholder="••••••••"
                       autoComplete="current-password"
-                      className="w-full rounded-xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
+                      className="w-full rounded-2xl border border-border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-accent"
                     />
                   </div>
-                  {loginError && <p className="text-sm text-red-600">{loginError}</p>}
+                  {loginError && <p className="text-sm text-destructive">{loginError}</p>}
                   <button
                     onClick={handleInlineLogin}
                     disabled={loginSubmitting}
-                    className="w-full bg-accent text-accent-foreground rounded-xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+                    className="w-full bg-accent text-accent-foreground rounded-2xl py-3 font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
                   >
                     {loginSubmitting ? "Logging in…" : "Log in & generate my preview"}
                   </button>

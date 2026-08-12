@@ -31,7 +31,7 @@ export default function AccountForm({
             type="email"
             value={email}
             disabled
-            className="mt-1 w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
+            className="mt-1 w-full rounded-2xl border border-border bg-muted px-3 py-2 text-sm text-muted-foreground"
           />
           <span className="text-xs text-muted-foreground mt-1 block">
             Contact support to change the email on your account.
@@ -41,8 +41,8 @@ export default function AccountForm({
         <Field label="Full name" name="full_name" type="text" defaultValue={fullName ?? ""} required maxLength={120} />
         <Field label="Phone" name="phone" type="tel" defaultValue={phone ?? ""} placeholder="e.g. (555) 123-4567" />
 
-        {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
-        {state?.success && <p className="text-sm text-green-700">Saved.</p>}
+        {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
+        {state?.success && <p className="text-sm text-success">Saved.</p>}
 
         <SubmitButton pending={pending}>Save changes</SubmitButton>
       </form>

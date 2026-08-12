@@ -26,13 +26,13 @@ export default async function SCOnboardingAgreementPage() {
     <div>
       <OnboardingSteps current={1} />
       <div className="mt-6 mb-4">
-        <h1 className="text-2xl font-bold">Partner Agreement</h1>
+        <h1 className="text-2xl font-semibold">Partner Agreement</h1>
         <p className="text-muted-foreground mt-1">
           Review and accept before setting up your profile.
         </p>
       </div>
 
-      <div className="border border-border rounded-xl p-6 max-h-72 overflow-y-auto text-sm leading-relaxed space-y-4 bg-muted/20">
+      <div className="border border-border rounded-2xl p-6 max-h-72 overflow-y-auto text-sm leading-relaxed space-y-4 bg-muted/20">
         <p className="font-semibold">Mysignjobs.com — Sign Company Partner Agreement</p>
         <p>
           By accepting this agreement, your company ("Sign Company") agrees to be bound by the
@@ -67,7 +67,8 @@ export default async function SCOnboardingAgreementPage() {
         </label>
         <button
           type="submit"
-          className="bg-accent text-accent-foreground rounded-lg px-6 py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+          className="rounded-full text-white px-6 py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+          style={{ backgroundImage: "var(--gradient-brand)" }}
         >
           Accept &amp; Continue
         </button>

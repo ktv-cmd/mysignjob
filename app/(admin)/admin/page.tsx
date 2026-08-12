@@ -88,7 +88,7 @@ export default async function AdminDashboard() {
   return (
     <div className="max-w-6xl mx-auto space-y-10">
       <div>
-        <h1 className="text-2xl font-bold">Admin Dashboard</h1>
+        <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
         <p className="text-muted-foreground mt-1">All quotes, sign companies, and transactions in one place.</p>
       </div>
 
@@ -98,7 +98,7 @@ export default async function AdminDashboard() {
         {bidRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No bids yet.</p>
         ) : (
-          <div className="border border-border rounded-xl overflow-x-auto">
+          <div className="border border-border rounded-2xl overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-left">
                 <tr>
@@ -131,7 +131,7 @@ export default async function AdminDashboard() {
                           <form action={selectWinningBidAction.bind(null, bid.order_id, bid.id)}>
                             <button
                               type="submit"
-                              className="text-xs bg-accent text-accent-foreground rounded-lg px-3 py-1.5 font-medium hover:opacity-90"
+                              className="text-xs bg-accent text-accent-foreground rounded-2xl px-3 py-1.5 font-medium hover:opacity-90"
                             >
                               Select as winner
                             </button>
@@ -153,7 +153,7 @@ export default async function AdminDashboard() {
         {scRows.length === 0 ? (
           <p className="text-sm text-muted-foreground">No sign companies yet.</p>
         ) : (
-          <div className="border border-border rounded-xl overflow-x-auto">
+          <div className="border border-border rounded-2xl overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-muted/40 text-left">
                 <tr>
@@ -177,7 +177,7 @@ export default async function AdminDashboard() {
                       <td className="px-4 py-2 capitalize">{sc.status}</td>
                       <td className="px-4 py-2">{sc.agreement_signed_at ? "✓" : "—"}</td>
                       <td className="px-4 py-2">
-                        {sc.insurance_verified ? (sc.insurance_reviewed_at ? "✓ reviewed" : "⏳ needs review") : "—"}
+                        {sc.insurance_verified ? (sc.insurance_reviewed_at ? "✓ reviewed" : "⋯ needs review") : "—"}
                       </td>
                       <td className="px-4 py-2">{sc.stripe_onboarding_complete ? "✓" : "—"}</td>
                       <td className="px-4 py-2">{sc.commission_rate}%</td>
@@ -186,7 +186,7 @@ export default async function AdminDashboard() {
                           <form action={approveSCInsuranceReviewAction.bind(null, sc.id)}>
                             <button
                               type="submit"
-                              className="text-xs bg-accent text-accent-foreground rounded-lg px-3 py-1.5 font-medium hover:opacity-90"
+                              className="text-xs bg-accent text-accent-foreground rounded-2xl px-3 py-1.5 font-medium hover:opacity-90"
                             >
                               Approve review
                             </button>
@@ -211,7 +211,7 @@ export default async function AdminDashboard() {
             {paymentRows.length === 0 ? (
               <p className="text-sm text-muted-foreground">No payments yet.</p>
             ) : (
-              <div className="border border-border rounded-xl overflow-x-auto">
+              <div className="border border-border rounded-2xl overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-left">
                     <tr>
@@ -243,7 +243,7 @@ export default async function AdminDashboard() {
             {transferRows.length === 0 ? (
               <p className="text-sm text-muted-foreground">No transfers yet.</p>
             ) : (
-              <div className="border border-border rounded-xl overflow-x-auto">
+              <div className="border border-border rounded-2xl overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-muted/40 text-left">
                     <tr>

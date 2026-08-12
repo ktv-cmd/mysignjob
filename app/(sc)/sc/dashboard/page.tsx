@@ -22,8 +22,21 @@ export default async function SCDashboard() {
   if (sc.status !== "active") {
     return (
       <div className="max-w-lg mx-auto mt-16 text-center">
-        <div className="text-4xl mb-4">⏳</div>
-        <h1 className="text-xl font-bold mb-2">Verification in Progress</h1>
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className="h-9 w-9 mx-auto mb-4"
+          style={{ color: "var(--color-brand-indigo)" }}
+          aria-hidden
+        >
+          <circle cx="12" cy="12" r="9" />
+          <path d="M12 7v5l3.5 2" />
+        </svg>
+        <h1 className="text-xl font-semibold mb-2">Verification in Progress</h1>
         <p className="text-muted-foreground mb-4">
           All your information has been submitted. Stripe is finalizing your identity verification —
           this usually takes a few minutes. Refresh the page to check your status.
@@ -74,7 +87,7 @@ export default async function SCDashboard() {
   return (
     <div className="max-w-5xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-bold">{sc.name}</h1>
+        <h1 className="text-2xl font-semibold">{sc.name}</h1>
         <p className="text-muted-foreground">SC Portal</p>
       </div>
 
@@ -83,14 +96,17 @@ export default async function SCDashboard() {
         <h2 className="text-lg font-semibold mb-4">
           Open Quote Requests{" "}
           {openForMe.length > 0 && (
-            <span className="ml-2 bg-accent text-accent-foreground text-xs px-2 py-0.5 rounded-full">
+            <span
+              className="ml-2 text-white text-xs px-2 py-0.5 rounded-2xl font-semibold"
+              style={{ backgroundImage: "var(--gradient-brand)" }}
+            >
               {openForMe.length}
             </span>
           )}
         </h2>
 
         {openForMe.length === 0 ? (
-          <div className="border border-border rounded-xl p-8 text-center text-muted-foreground">
+          <div className="border border-border rounded-2xl p-8 text-center text-muted-foreground">
             No open quote requests right now. Check back soon.
           </div>
         ) : (
@@ -102,7 +118,7 @@ export default async function SCDashboard() {
                 <Link
                   key={order.id}
                   href={`/sc/quotes/${order.id}`}
-                  className="block border border-border rounded-xl p-5 hover:bg-muted/50 transition-colors"
+                  className="block border border-border rounded-2xl p-5 hover:bg-muted/50 transition-colors"
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -132,7 +148,7 @@ export default async function SCDashboard() {
       <section>
         <h2 className="text-lg font-semibold mb-4">Active Jobs</h2>
         {!activeJobs || activeJobs.length === 0 ? (
-          <div className="border border-border rounded-xl p-8 text-center text-muted-foreground">
+          <div className="border border-border rounded-2xl p-8 text-center text-muted-foreground">
             No active jobs.
           </div>
         ) : (
@@ -141,13 +157,13 @@ export default async function SCDashboard() {
               <Link
                 key={job.id}
                 href={`/sc/jobs/${job.id}`}
-                className="block border border-border rounded-xl p-5 hover:bg-muted/50 transition-colors"
+                className="block border border-border rounded-2xl p-5 hover:bg-muted/50 transition-colors"
               >
                 <div className="flex items-center justify-between">
                   <p className="font-medium">
                     {(job.orders as { sign_spec?: { business_name?: string } })?.sign_spec?.business_name ?? "Job"}
                   </p>
-                  <span className="text-xs px-2 py-1 bg-muted rounded-full capitalize">
+                  <span className="text-xs px-2 py-1 bg-muted rounded-2xl capitalize">
                     {job.status}
                   </span>
                 </div>
@@ -172,7 +188,7 @@ export default async function SCDashboard() {
                     {new Date(t.created_at).toLocaleDateString()}
                   </p>
                 </div>
-                <p className="font-semibold text-green-600">{formatCents(t.amount_cents)}</p>
+                <p className="font-semibold text-success">{formatCents(t.amount_cents)}</p>
               </div>
             ))}
           </div>

@@ -123,6 +123,7 @@ export async function POST(req: NextRequest) {
       hasBackground: body.hasBackground,
       bgMaterial: body.bgMaterial,
       acrylic: body.acrylic ?? null,
+      logoColorMatch: body.logoColorMatch,
       count: body.count ?? 3,
       customPrompt: body.customPrompt,
       photoPath,

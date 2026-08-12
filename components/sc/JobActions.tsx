@@ -20,7 +20,7 @@ export default function JobActions({ jobId, canSubmit }: { jobId: string; canSub
         <button
           type="submit"
           disabled={uploadPending}
-          className="text-xs bg-muted rounded-lg px-3 py-1.5 font-medium hover:bg-muted/70 disabled:opacity-50 transition-colors flex-shrink-0"
+          className="text-xs bg-muted rounded-2xl px-3 py-1.5 font-medium hover:bg-muted/70 disabled:opacity-50 transition-colors flex-shrink-0"
         >
           {uploadPending ? "Uploading…" : "Upload photo"}
         </button>
@@ -32,7 +32,7 @@ export default function JobActions({ jobId, canSubmit }: { jobId: string; canSub
           <button
             type="submit"
             disabled={submitPending}
-            className="w-full bg-accent text-accent-foreground rounded-xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="w-full bg-accent text-accent-foreground rounded-2xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
           >
             {submitPending ? "Submitting…" : "Submit for Client Review"}
           </button>

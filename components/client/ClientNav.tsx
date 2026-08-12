@@ -35,7 +35,7 @@ export default function ClientNav() {
           </Link>
           <Link
             href="/order/new"
-            className="cut-corner-sm flex items-center text-accent-foreground px-3.5 py-2 text-sm font-semibold hover:opacity-90 transition-opacity"
+            className="rounded-full flex items-center text-accent-foreground px-3.5 py-2 text-sm font-semibold hover:opacity-90 transition-opacity"
             style={{ backgroundImage: "var(--gradient-brand)" }}
           >
             + New Sign

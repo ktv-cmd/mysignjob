@@ -1,7 +1,18 @@
 "use client"
 
-import { useRef, useEffect, useState, useCallback } from "react"
+import { useRef, useEffect, useState } from "react"
 import { fitQuadToRatio } from "@/lib/sign-geometry"
+import {
+  type Pt,
+  vecSub, vecAdd, vecScale, vecLen, vecUnit, vecDot, vecRotate,
+  pointInPolygon, canvasScale, drawLoupe, getCanvasCoords,
+  HANDLE_RADIUS, TOUCH_HANDLE_CSS_RADIUS, TOUCH_HIT_CSS_RADIUS,
+} from "@/lib/canvas-touch"
+import {
+  type RefParams,
+  DOOR_ASPECT, MAX_YAW, MIN_REF_H, MAX_REF_H, MIN_REF_W,
+  defaultRefParams, refQuadFromParams, stemHandlePos, drawDoorIcon,
+} from "@/lib/door-outline-shape"
 
 export type QuadPoint = { x: number; y: number } // normalized 0–1
 
@@ -9,12 +20,12 @@ interface Props {
   imageDataUrl: string
   onChange: (quad: QuadPoint[]) => void // [TL,TR,BR,BL] flat | [TL,TM,TR,BR,BM,BL] corner
   corner?: boolean
-  onReferenceChange?: (points: QuadPoint[]) => void // [A,B] ruler mode | [TL,TR,BR,BL] door/brick sticker mode
+  onReferenceChange?: (points: QuadPoint[]) => void // [A,B] ruler mode | [TL,TR,BR,BL] door outline mode
   onImageLoad?: (naturalWidth: number, naturalHeight: number) => void
   referenceLabel?: string // Label chip text shown at midpoint — never a number
-  referenceIcon?: "door" | "brick" | "ruler" // visual overlay for the reference object — icon to place on top of the real object, instead of a plain ruler
+  referenceIcon?: "door" | "ruler" // visual overlay for the reference object — a door outline to place over the real door, or a plain ruler for any other object
   showReference?: boolean // when false, hides the reference overlay entirely and excludes it from hit-testing (client already knows the sign's exact size)
-  caption?: string // overrides the default "drag the gold box corners" caption below the canvas — use when this render of the canvas is really about the reference (e.g. a dedicated door/brick placement screen), not the gold box
+  caption?: string // overrides the default "drag the gold box corners" caption below the canvas — use when this render of the canvas is really about the reference (e.g. a dedicated door placement screen), not the gold box
   // Aspect-ratio lock — once the sign's real width:height ratio is known
   // (typed, reference-calibrated, or a Maps cross-check), the parent passes
   // these so the quad can no longer be freely stretched/skewed away from the
@@ -34,23 +45,11 @@ interface Props {
   applyQuad?: QuadPoint[]
 }
 
-const HANDLE_RADIUS = 10
 const GOLD = "#FFD740"
 const FOLD_COLOR = "#FF8C42"  // orange — fold handles are visually distinct
 const REFERENCE_COLOR = "#00E5FF" // cyan — reference line, distinct from quad/fold
 const LOCK_ACCENT = "#4ADE80"  // green — the resize/rotate handles that appear once the quad is ratio-locked, visually distinct from GOLD's free-drag corners
 const LOCK_MUTED = "rgba(255,255,255,0.6)"
-
-// Touch-only sizing: visible dot stays modest, but the invisible grab zone
-// clears Apple's ~44px minimum tap target so fingers don't need pixel accuracy.
-const TOUCH_HANDLE_CSS_RADIUS = 14
-const TOUCH_HIT_CSS_RADIUS = 24
-
-// Magnifier loupe (touch only) — shown while dragging so the target point
-// isn't hidden under the fingertip.
-const LOUPE_CSS_RADIUS = 60
-const LOUPE_ZOOM = 2.5
-const LOUPE_CSS_OFFSET = 90
 
 // Locked-mode resize/rotate handle sizing (css px, same touch-scaling convention as above)
 const RESIZE_HANDLE_CSS = 8
@@ -82,12 +81,12 @@ function defaultQuad(corner: boolean): QuadPoint[] {
 
 // Positioned near the bottom of the frame — away from the default quad box
 // (which sits in the y 0.15–0.43 band) so the two don't overlap. Ruler mode
-// is a simple 2-point A/B line (an arbitrary object's length); door/brick
+// is a simple 2-point A/B line (an arbitrary object's length); door
 // sticker mode is a 4-point quad [TL,TR,BR,BL], same convention as the sign
 // quad, so its corners can be dragged independently to match an object that
 // sits at an angle in the photo instead of always rendering as a fixed
 // vertical rectangle.
-function defaultReference(icon: "door" | "brick" | "ruler"): QuadPoint[] {
+function defaultReference(icon: "door" | "ruler"): QuadPoint[] {
   if (icon === "ruler") {
     return [
       { x: 0.5, y: 0.75 },
@@ -104,90 +103,14 @@ function defaultReference(icon: "door" | "brick" | "ruler"): QuadPoint[] {
   ]
 }
 
-// canvas-space px per 1 css px, given the element's current on-screen size
-function canvasScale(canvas: HTMLCanvasElement) {
-  const rect = canvas.getBoundingClientRect()
-  return rect.width ? canvas.width / rect.width : 1
-}
-
-function drawLoupe(ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, img: HTMLImageElement, W: number, H: number, px: number, py: number) {
-  const scale = canvasScale(canvas)
-  const loupeRadius = LOUPE_CSS_RADIUS * scale
-  const srcRadius = loupeRadius / LOUPE_ZOOM
-  const vOffset = LOUPE_CSS_OFFSET * scale
-
-  const cx = Math.max(loupeRadius, Math.min(W - loupeRadius, px))
-  let cy = py - vOffset
-  if (cy - loupeRadius < 0) cy = py + vOffset
-  cy = Math.max(loupeRadius, Math.min(H - loupeRadius, cy))
-
-  const sw = srcRadius * 2
-  const sh = srcRadius * 2
-  const sx = Math.max(0, Math.min(W - sw, px - srcRadius))
-  const sy = Math.max(0, Math.min(H - sh, py - srcRadius))
-
-  // Map the canvas-space crop rect into the source photo's natural pixel
-  // space (the canvas draws the photo scaled to W×H, so the two spaces
-  // differ whenever the photo's native resolution isn't exactly W×H).
-  const imgScaleX = img.naturalWidth / W
-  const imgScaleY = img.naturalHeight / H
-
-  ctx.save()
-  ctx.beginPath()
-  ctx.arc(cx, cy, loupeRadius, 0, Math.PI * 2)
-  ctx.closePath()
-  ctx.clip()
-  ctx.fillStyle = "#111"
-  ctx.fillRect(cx - loupeRadius, cy - loupeRadius, loupeRadius * 2, loupeRadius * 2)
-  // Magnify straight from the source photo — never the composited canvas.
-  // The canvas already has the active handle's own (enlarged, touch-sized)
-  // indicator circle painted right at this point; capturing from the canvas
-  // would blow that circle up 2.5x along with everything else, filling most
-  // of the loupe with an opaque white blob and hiding the real photo detail
-  // the loupe exists to reveal.
-  ctx.drawImage(
-    img,
-    sx * imgScaleX, sy * imgScaleY, sw * imgScaleX, sh * imgScaleY,
-    cx - loupeRadius, cy - loupeRadius, loupeRadius * 2, loupeRadius * 2,
-  )
-
-  // Crosshair at the exact target point — offset accounts for source-rect clamping near edges.
-  const targetX = cx + (px - (sx + srcRadius)) * LOUPE_ZOOM
-  const targetY = cy + (py - (sy + srcRadius)) * LOUPE_ZOOM
-  ctx.strokeStyle = "rgba(255,255,255,0.95)"
-  ctx.lineWidth = 1.5
-  ctx.beginPath()
-  ctx.moveTo(targetX - 9, targetY)
-  ctx.lineTo(targetX + 9, targetY)
-  ctx.moveTo(targetX, targetY - 9)
-  ctx.lineTo(targetX, targetY + 9)
-  ctx.stroke()
-  ctx.restore()
-
-  ctx.beginPath()
-  ctx.arc(cx, cy, loupeRadius, 0, Math.PI * 2)
-  ctx.strokeStyle = GOLD
-  ctx.lineWidth = 3
-  ctx.stroke()
-}
-
-type Pt = { x: number; y: number }
-
-// ── Small vector helpers (canvas-px space) for the aspect-ratio-locked
-// resize/rotate handles below. Kept tiny and generic on purpose — this is
-// the only place in the component that needs real vector math, everywhere
-// else works directly with x/y.
-function vecSub(a: Pt, b: Pt): Pt { return { x: a.x - b.x, y: a.y - b.y } }
-function vecAdd(a: Pt, b: Pt): Pt { return { x: a.x + b.x, y: a.y + b.y } }
-function vecScale(a: Pt, s: number): Pt { return { x: a.x * s, y: a.y * s } }
-function vecLen(a: Pt): number { return Math.hypot(a.x, a.y) }
-function vecUnit(a: Pt): Pt { const l = vecLen(a) || 1; return { x: a.x / l, y: a.y / l } }
-function vecDot(a: Pt, b: Pt): number { return a.x * b.x + a.y * b.y }
-function vecRotate(a: Pt, angle: number): Pt {
-  const c = Math.cos(angle), s = Math.sin(angle)
-  return { x: a.x * c - a.y * s, y: a.x * s + a.y * c }
-}
-
+// ── Reference outline (door) shape model ──────────────────────────────────
+// The outline used to be four independently-draggable corners, which let it be
+// skewed into shapes no real rectangle can project to. That matters beyond
+// looks: the outline's height is what sets the photo's inches-per-pixel scale
+// (computeSignDimensions in lib/sign-geometry.ts), so an impossible shape
+// silently corrupts every measurement derived from it. It is now driven by
+// these parameters instead, so every reachable shape is a genuine rectangle
+// seen from some real camera position.
 // Canvas position of the rotate handle — offset outward from the shape's own
 // current top edge (flat) or fold line (corner), so it stays sensibly placed
 // as the shape rotates instead of always pointing screen-up. Shared between
@@ -206,142 +129,39 @@ function rotateHandlePos(pts: Pt[], isCornerMode: boolean): Pt {
   return vecAdd(mid, vecScale(outward, ROTATE_STEM_CSS_LEN))
 }
 
-// Bilinear interpolation across an arbitrary quad [TL,TR,BR,BL] — s=0..1 left→right,
-// t=0..1 top→bottom. Lets the door/brick decorative details (panels, knob, mortar
-// joint) sit at the same relative position regardless of how the quad's 4 corners
-// have been dragged (rotated, skewed by perspective, stretched unevenly, etc.),
-// instead of assuming a fixed-perpendicular-offset rectangle from just 2 points.
-function bilerpQuad(tl: Pt, tr: Pt, br: Pt, bl: Pt, s: number, t: number): Pt {
-  const top = { x: tl.x + (tr.x - tl.x) * s, y: tl.y + (tr.y - tl.y) * s }
-  const bottom = { x: bl.x + (br.x - bl.x) * s, y: bl.y + (br.y - bl.y) * s }
-  return { x: top.x + (bottom.x - top.x) * t, y: top.y + (bottom.y - top.y) * t }
-}
-
-// Semi-transparent door silhouette (rounded slab + knob) drawn across the
-// [TL,TR,BR,BL] quad — same corner convention as the sign quad — so the
-// client can drag any corner independently to match a door that sits at an
-// angle in the photo, not just stretch a fixed vertical rectangle.
-function drawDoorIcon(ctx: CanvasRenderingContext2D, tl: Pt, tr: Pt, br: Pt, bl: Pt) {
-  ctx.save()
-  ctx.shadowColor = "rgba(0,0,0,0.6)"
-  ctx.shadowBlur = 12
-  ctx.beginPath()
-  ctx.moveTo(tl.x, tl.y)
-  ctx.lineTo(tr.x, tr.y)
-  ctx.lineTo(br.x, br.y)
-  ctx.lineTo(bl.x, bl.y)
-  ctx.closePath()
-  ctx.fillStyle = "rgba(255,166,60,0.55)"
-  ctx.fill()
-  ctx.shadowBlur = 0
-
-  // Double outline — white halo under a dark wood stroke — pops on any photo
-  ctx.strokeStyle = "rgba(255,255,255,0.95)"
-  ctx.lineWidth = 6
-  ctx.stroke()
-  ctx.strokeStyle = "rgba(120,66,18,0.95)"
-  ctx.lineWidth = 3
-  ctx.stroke()
-
-  // Inner door panels (two stacked rectangles) — reads as "door" at a glance
-  const panel = (fromT: number, toT: number) => {
-    const sMin = 0.22, sMax = 0.78
-    const p1a = bilerpQuad(tl, tr, br, bl, sMin, fromT)
-    const p1b = bilerpQuad(tl, tr, br, bl, sMax, fromT)
-    const p2b = bilerpQuad(tl, tr, br, bl, sMax, toT)
-    const p2a = bilerpQuad(tl, tr, br, bl, sMin, toT)
-    ctx.beginPath()
-    ctx.moveTo(p1a.x, p1a.y)
-    ctx.lineTo(p1b.x, p1b.y)
-    ctx.lineTo(p2b.x, p2b.y)
-    ctx.lineTo(p2a.x, p2a.y)
-    ctx.closePath()
-    ctx.stroke()
+// Recover parameters from an un-swung rectangle — used when the client
+// switches away from the 2-point ruler, so their existing placement carries
+// over instead of snapping back to the default.
+function refParamsFromLine(a: Pt, b: Pt, W: number, H: number, aspect: number): RefParams {
+  const down = vecSub(b, a)
+  const lenPx = vecLen(down)
+  const h = Math.max(lenPx / H, MIN_REF_H)
+  return {
+    cx: (a.x + b.x) / 2 / W,
+    cy: (a.y + b.y) / 2 / H,
+    h,
+    w: h * aspect,
+    rot: lenPx > 0.001 ? Math.atan2(-down.x, down.y) : 0,
+    yaw: 0,
   }
-  ctx.strokeStyle = "rgba(120,66,18,0.8)"
-  ctx.lineWidth = 2
-  panel(0.12, 0.44)
-  panel(0.56, 0.88)
-
-  // Knob, roughly waist-height on the handle side
-  const knob = bilerpQuad(tl, tr, br, bl, 0.88, 0.5)
-  const widthEstimate = (Math.hypot(tr.x - tl.x, tr.y - tl.y) + Math.hypot(br.x - bl.x, br.y - bl.y)) / 2
-  ctx.beginPath()
-  ctx.arc(knob.x, knob.y, Math.max(4, widthEstimate * 0.07), 0, Math.PI * 2)
-  ctx.fillStyle = "rgba(255,255,255,0.95)"
-  ctx.fill()
-  ctx.strokeStyle = "rgba(60,40,20,0.9)"
-  ctx.lineWidth = 2
-  ctx.stroke()
-  ctx.restore()
-}
-
-// Semi-transparent brick silhouette (single course + mortar joint) drawn
-// across the [TL,TR,BR,BL] quad — same corner convention as drawDoorIcon.
-function drawBrickIcon(ctx: CanvasRenderingContext2D, tl: Pt, tr: Pt, br: Pt, bl: Pt) {
-  ctx.save()
-  ctx.beginPath()
-  ctx.moveTo(tl.x, tl.y)
-  ctx.lineTo(tr.x, tr.y)
-  ctx.lineTo(br.x, br.y)
-  ctx.lineTo(bl.x, bl.y)
-  ctx.closePath()
-  ctx.shadowColor = "rgba(0,0,0,0.6)"
-  ctx.shadowBlur = 12
-  ctx.fillStyle = "rgba(210,70,50,0.6)"
-  ctx.fill()
-  ctx.shadowBlur = 0
-  ctx.strokeStyle = "rgba(255,255,255,0.95)"
-  ctx.lineWidth = 5
-  ctx.stroke()
-  ctx.strokeStyle = "rgba(90,30,20,0.95)"
-  ctx.lineWidth = 2.5
-  ctx.stroke()
-
-  // Mortar joint across the middle of the brick face
-  const midLeft = bilerpQuad(tl, tr, br, bl, 0, 0.5)
-  const midRight = bilerpQuad(tl, tr, br, bl, 1, 0.5)
-  ctx.beginPath()
-  ctx.moveTo(midLeft.x, midLeft.y)
-  ctx.lineTo(midRight.x, midRight.y)
-  ctx.strokeStyle = "rgba(255,255,255,0.6)"
-  ctx.lineWidth = 1.5
-  ctx.stroke()
-  ctx.restore()
-}
-
-// Point-in-polygon (ray casting) — used to hit-test "inside the quad/reference
-// body" for whole-shape drag, in canvas-px space. Works for any simple polygon,
-// including the non-convex 6-point corner-sign hexagon.
-function pointInPolygon(x: number, y: number, poly: { x: number; y: number }[]): boolean {
-  let inside = false
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-    const xi = poly[i].x, yi = poly[i].y
-    const xj = poly[j].x, yj = poly[j].y
-    const intersects = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi
-    if (intersects) inside = !inside
-  }
-  return inside
 }
 
 // Handle-index scheme: quad corners come first (0..quadLen-1), then the
-// reference's own points (ruler mode: A, B; door/brick sticker mode:
-// [TL,TR,BR,BL] — genuine point handles, so any one of them can be dragged
-// independently to skew the shape for an angled photo), then — sticker mode
-// only — 4 edge-midpoint handles (REF_EDGE_TOP/RIGHT/BOTTOM/LEFT: drag one
-// edge to resize that single dimension while keeping the shape rectangular,
-// the common case for a straight-on photo of a straight door, without having
-// to carefully drag all 4 corners to avoid skewing it), then REF_BODY ("grab
-// the middle and move the whole thing") and QUAD_BODY ("grab anywhere inside
-// the gold box and move it"), then — only meaningful once the quad is
-// ratio-locked (see Props.lockedAspectRatio et al.) — QUAD_RESIZE_A/B and
-// QUAD_ROTATE: the handles that replace free corner-dragging once the quad's
-// shape must stay tied to a known real-world ratio. Centralized here so
+// reference's own points (ruler mode: A, B — freely draggable; door/brick
+// sticker mode: [TL,TR,BR,BL], which now all scale the outline about its
+// center rather than dragging free), then — sticker mode only —
+// REF_WIDTH_LEFT/RIGHT (width alone), REF_ROTATE (in-plane spin) and REF_YAW
+// (swing about the vertical axis), then REF_BODY ("grab the middle and move
+// the whole thing") and QUAD_BODY ("grab anywhere inside the gold box and
+// move it"), then — only meaningful once the quad is ratio-locked (see
+// Props.lockedAspectRatio et al.) — QUAD_RESIZE_A/B and QUAD_ROTATE: the
+// handles that replace free corner-dragging once the quad's shape must stay
+// tied to a known real-world ratio. Centralized here so
 // findHandle/draw/onDown/onMove/onHover/onUp agree. Priority: quad corners
-// and reference points first (most specific), then the reference's edge
-// handles, then the lock handles, then QUAD_BODY (the box is the primary
-// thing on this step, so it wins over REF_BODY where the two shapes
-// overlap), then REF_BODY.
+// and reference points first (most specific), then the reference's
+// width/rotate/yaw handles, then the lock handles, then QUAD_BODY (the box is
+// the primary thing on this step, so it wins over REF_BODY where the two
+// shapes overlap), then REF_BODY.
 function bodyDragIndices(quadLen: number, showReference: boolean, refLen: number) {
   const refPointCount = showReference ? refLen : 0
   const pointHandleCount = quadLen + refPointCount
@@ -349,10 +169,10 @@ function bodyDragIndices(quadLen: number, showReference: boolean, refLen: number
   return {
     refPointCount,
     pointHandleCount,
-    REF_EDGE_TOP: pointHandleCount,
-    REF_EDGE_RIGHT: pointHandleCount + 1,
-    REF_EDGE_BOTTOM: pointHandleCount + 2,
-    REF_EDGE_LEFT: pointHandleCount + 3,
+    REF_WIDTH_LEFT: pointHandleCount,
+    REF_WIDTH_RIGHT: pointHandleCount + 1,
+    REF_ROTATE: pointHandleCount + 2,
+    REF_YAW: pointHandleCount + 3,
     REF_BODY: pointHandleCount + 4,
     QUAD_BODY,
     // Ratio-locked handles — QUAD_RESIZE_A is the sole resize handle in flat
@@ -373,6 +193,19 @@ type LockDrag =
   | { kind: "resize-front" | "resize-side"; anchor: Pt; upDir: Pt; frontDir: Pt; sideDir: Pt }
   | { kind: "rotate"; centroid: Pt; startAngle: number; snapshot: QuadPoint[] }
 
+// Drag-start snapshot for the reference sticker's parameterized handles — same
+// rationale as LockDrag: every move recomputes from a frozen starting state
+// rather than accumulating on top of a shape it is itself mutating. startRelX
+// (the pointer's x in the shape's own un-rotated frame) is what keeps the
+// width and yaw grips from jumping when they're grabbed off-center.
+type RefDrag = {
+  kind: "scale" | "width" | "rotate" | "yaw"
+  start: RefParams
+  startDist: number
+  startAngle: number
+  startRelX: number
+}
+
 export default function QuadSelector({
   imageDataUrl, onChange, corner = false, onReferenceChange, onImageLoad,
   referenceLabel = "reference", referenceIcon = "ruler", showReference = true, caption,
@@ -383,6 +216,23 @@ export default function QuadSelector({
   const quadRef = useRef<QuadPoint[]>(defaultQuad(corner))
   const referenceRef = useRef<QuadPoint[]>(defaultReference(referenceIcon))
   const draggingRef = useRef<number | null>(null)
+  // Coalesces the redraws triggered by a drag's pointermove stream to once per
+  // animation frame. Touch/mouse can fire pointermove far faster than the
+  // display refreshes; without this, every single event synchronously redraws
+  // the full photo plus every overlay (and, on touch, the magnifier loupe's
+  // own extra drawImage), which falls behind on a mid-range phone and reads
+  // as the box stuttering/shaking rather than following the finger smoothly.
+  const dragRafRef = useRef<number | null>(null)
+  // Deliberately not useCallback: draw() reads render-scoped values (isCoarse
+  // etc.), so this must close over the current render's draw, not one frozen
+  // the first time a memoized version was created.
+  function scheduleDraw() {
+    if (dragRafRef.current !== null) return
+    dragRafRef.current = requestAnimationFrame(() => {
+      dragRafRef.current = null
+      draw()
+    })
+  }
   // Last pointer position (normalized) while dragging a whole shape's body
   // (either the quad or the reference icon — only one drag is active at a time)
   const bodyDragLastRef = useRef<{ x: number; y: number } | null>(null)
@@ -390,6 +240,20 @@ export default function QuadSelector({
   const prevCornerRef = useRef(corner)
   const [, forceRender] = useState(0)
   const [isCoarse, setIsCoarse] = useState(false)
+
+  const isStickerMode = referenceIcon === "door"
+  // Authoritative shape state in sticker mode — referenceRef stays the derived
+  // 4-point output so draw(), onReferenceChange and computeSignDimensions all
+  // keep working against the same normalized-quad contract as before.
+  const refParamsRef = useRef<RefParams>(defaultRefParams())
+  const refDragRef = useRef<RefDrag | null>(null)
+
+  function syncReferenceFromParams(): boolean {
+    const canvas = canvasRef.current
+    if (!canvas?.width || !canvas.height) return false
+    referenceRef.current = refQuadFromParams(refParamsRef.current, canvas.width, canvas.height)
+    return true
+  }
 
   // Once real dimensions are known (typed, reference-calibrated, or a Maps
   // cross-check), the parent passes the target ratio(s) here and the quad can
@@ -444,33 +308,32 @@ export default function QuadSelector({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [applyQuad])
 
-  // Ruler mode's reference is a 2-point A/B line; door/brick sticker mode is
+  // Ruler mode's reference is a 2-point A/B line; door outline mode is
   // a 4-point [TL,TR,BR,BL] quad. When referenceIcon switches between them,
   // convert the existing reference into the new shape instead of resetting
   // it, so the client doesn't lose their placement on every mode change.
   useEffect(() => {
-    const isSticker = referenceIcon === "door" || referenceIcon === "brick"
+    const canvas = canvasRef.current
     const ref = referenceRef.current
-    if (isSticker && ref.length === 2) {
-      const [a, b] = ref
-      const dx = b.x - a.x, dy = b.y - a.y
-      const len = Math.hypot(dx, dy) || 0.01
-      const ux = dx / len, uy = dy / len
-      const px = -uy, py = ux
-      const width = (referenceIcon === "door" ? 0.45 : 2) * len
-      referenceRef.current = [
-        { x: a.x + px * width / 2, y: a.y + py * width / 2 },
-        { x: a.x - px * width / 2, y: a.y - py * width / 2 },
-        { x: b.x - px * width / 2, y: b.y - py * width / 2 },
-        { x: b.x + px * width / 2, y: b.y + py * width / 2 },
-      ]
-      onReferenceChange?.([...referenceRef.current])
-      draw()
-    } else if (!isSticker && ref.length === 4) {
-      const [tl, tr, , bl] = ref
+    if (isStickerMode) {
+      if (ref.length === 2 && canvas?.width && canvas.height) {
+        // Carry the ruler's A→B placement across: its length becomes the
+        // outline's height, its direction the outline's rotation.
+        refParamsRef.current = refParamsFromLine(
+          { x: ref[0].x * canvas.width, y: ref[0].y * canvas.height },
+          { x: ref[1].x * canvas.width, y: ref[1].y * canvas.height },
+          canvas.width, canvas.height, DOOR_ASPECT,
+        )
+      }
+      if (syncReferenceFromParams()) {
+        onReferenceChange?.([...referenceRef.current])
+        draw()
+      }
+    } else if (ref.length === 4) {
+      const [tl, tr, br, bl] = ref
       referenceRef.current = [
         { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 },
-        { x: (bl.x + ref[2].x) / 2, y: (bl.y + ref[2].y) / 2 },
+        { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 },
       ]
       onReferenceChange?.([...referenceRef.current])
       draw()
@@ -504,21 +367,17 @@ export default function QuadSelector({
       if (img.naturalWidth && img.naturalHeight) {
         onImageLoad?.(img.naturalWidth, img.naturalHeight)
       }
+      // Canvas dimensions are only known now, and the sticker's parameters are
+      // canvas-relative — so this is the first point the real outline (correct
+      // door proportions in *pixel* space, not normalized space) exists.
+      if (isStickerMode && syncReferenceFromParams()) {
+        onReferenceChange?.([...referenceRef.current])
+      }
       draw()
     }
     img.src = imageDataUrl
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imageDataUrl])
-
-  const getCanvasCoords = useCallback((e: PointerEvent, canvas: HTMLCanvasElement) => {
-    const rect = canvas.getBoundingClientRect()
-    const scaleX = canvas.width / rect.width
-    const scaleY = canvas.height / rect.height
-    return {
-      x: (e.clientX - rect.left) * scaleX,
-      y: (e.clientY - rect.top) * scaleY,
-    }
-  }, [])
 
   function draw() {
     const canvas = canvasRef.current
@@ -756,36 +615,35 @@ export default function QuadSelector({
       }
     }
 
-    // ── Reference — ruler/measuring-tape treatment, or door/brick sticker quad ──
+    // ── Reference — ruler/measuring-tape treatment, or the door outline quad ──
     const reference = referenceRef.current
     const refPts = reference.map(p => ({ x: p.x * W, y: p.y * H }))
     const refActiveIdx = activeIdx !== null && activeIdx >= quad.length ? activeIdx - quad.length : null
-    const isStickerMode = referenceIcon === "door" || referenceIcon === "brick"
-    const { pointHandleCount, REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT } =
+    const { pointHandleCount, REF_WIDTH_LEFT, REF_WIDTH_RIGHT, REF_ROTATE, REF_YAW } =
       bodyDragIndices(quad.length, showReference, reference.length)
 
     if (showReference) {
     if (isStickerMode && refPts.length === 4) {
-      // Door/brick sticker: an arbitrary [TL,TR,BR,BL] quad — draw the icon
+      // Door outline: an arbitrary [TL,TR,BR,BL] quad — draw the icon
       // across whatever shape the 4 corners currently form.
       const [tl, tr, br, bl] = refPts
-      if (referenceIcon === "door") {
-        drawDoorIcon(ctx, tl, tr, br, bl)
-      } else {
-        drawBrickIcon(ctx, tl, tr, br, bl)
-      }
+      drawDoorIcon(ctx, tl, tr, br, bl)
 
-      // Label chip above the top edge, offset away from the shape.
+      const dotColor = "rgba(120,66,18,0.95)"
+      const haloColor = dotColor.replace("0.95", "0.4")
+      const scale = canvasScale(canvas)
+      const grip = isCoarse ? TOUCH_HANDLE_CSS_RADIUS * scale * 1.2 : HANDLE_RADIUS + 3
       const topMid = { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }
+      const bottomMid = { x: (bl.x + br.x) / 2, y: (bl.y + br.y) / 2 }
       const centroid = {
         x: (tl.x + tr.x + br.x + bl.x) / 4,
         y: (tl.y + tr.y + br.y + bl.y) / 4,
       }
-      let awayX = topMid.x - centroid.x, awayY = topMid.y - centroid.y
-      const awayLen = Math.hypot(awayX, awayY) || 1
-      awayX /= awayLen; awayY /= awayLen
-      const chipX = topMid.x + awayX * 22
-      const chipY = topMid.y + awayY * 22
+
+      // Label chip parked outside the top-left corner — it used to sit above
+      // the top edge, which is now where the rotate stem lives.
+      const alongTop = vecUnit(vecSub(tl, tr))
+      const chipAway = vecLen(vecSub(tl, centroid)) > 0.001 ? vecUnit(vecSub(tl, centroid)) : { x: 0, y: -1 }
       ctx.save()
       ctx.font = "bold 10px system-ui"
       ctx.textAlign = "center"
@@ -793,6 +651,8 @@ export default function QuadSelector({
       const chipText = referenceLabel
       const tw = ctx.measureText(chipText).width + 10
       const th = 18
+      const chipX = tl.x + alongTop.x * (tw / 2 + 6) + chipAway.x * 10
+      const chipY = tl.y + alongTop.y * (tw / 2 + 6) + chipAway.y * 10
       ctx.fillStyle = "rgba(0,0,0,0.70)"
       ctx.beginPath()
       ctx.roundRect(chipX - tw / 2, chipY - th / 2, tw, th, 4)
@@ -801,23 +661,22 @@ export default function QuadSelector({
       ctx.fillText(chipText, chipX, chipY)
       ctx.restore()
 
-      // Corner dots — same touch-friendly sizing as the quad's own corners,
-      // but unlabeled (no TL/TR/BR/BL text) so they don't read as a second,
-      // confusing "gold box" and to keep the small icon visually clean.
-      const dotColor = referenceIcon === "door" ? "rgba(120,66,18,0.95)" : "rgba(90,30,20,0.95)"
-      const refHandleR = isCoarse ? TOUCH_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.2 : HANDLE_RADIUS + 3
+      // Corners — square grips, because they now scale the whole outline about
+      // its center (proportions kept) rather than dragging one corner free.
+      // All four do the same thing on purpose: four big targets for the most
+      // common adjustment beats one, especially on a phone.
       refPts.forEach((p, i) => {
         const isActive = isCoarse && i === refActiveIdx
-        const r = isActive ? refHandleR * 1.25 : refHandleR
+        const r = (isActive ? grip * 1.25 : grip) * 0.85
         if (isActive) {
           ctx.beginPath()
-          ctx.arc(p.x, p.y, r + 5, 0, Math.PI * 2)
-          ctx.strokeStyle = dotColor.replace("0.95", "0.4")
+          ctx.roundRect(p.x - r - 4, p.y - r - 4, r * 2 + 8, r * 2 + 8, 5)
+          ctx.strokeStyle = haloColor
           ctx.lineWidth = 3
           ctx.stroke()
         }
         ctx.beginPath()
-        ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+        ctx.roundRect(p.x - r, p.y - r, r * 2, r * 2, 3)
         ctx.fillStyle = "white"
         ctx.fill()
         ctx.strokeStyle = dotColor
@@ -825,37 +684,70 @@ export default function QuadSelector({
         ctx.stroke()
       })
 
-      // Edge-midpoint handles — small pill-shaped grips, distinct from the
-      // round corner dots, so it's visually clear they do something different
-      // (resize one dimension, keep the shape rectangular) rather than
-      // reading as a 5th/6th/7th/8th corner.
-      const edgeMidpoints: [number, Pt, boolean][] = [
-        [REF_EDGE_TOP, { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 }, true],
-        [REF_EDGE_BOTTOM, { x: (br.x + bl.x) / 2, y: (br.y + bl.y) / 2 }, true],
-        [REF_EDGE_LEFT, { x: (bl.x + tl.x) / 2, y: (bl.y + tl.y) / 2 }, false],
-        [REF_EDGE_RIGHT, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 }, false],
+      // Side pills — width only, so a wide double door can be matched without
+      // disturbing the height the measurement rides on.
+      const widthGrips: [number, Pt][] = [
+        [REF_WIDTH_LEFT, { x: (bl.x + tl.x) / 2, y: (bl.y + tl.y) / 2 }],
+        [REF_WIDTH_RIGHT, { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 }],
       ]
-      const edgeR = (isCoarse ? TOUCH_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.2 : HANDLE_RADIUS + 3) * 0.8
-      edgeMidpoints.forEach(([edgeIdx, p, horizontal]) => {
-        const isActive = isCoarse && activeIdx === edgeIdx
-        const r = isActive ? edgeR * 1.25 : edgeR
-        const w = horizontal ? r * 2.4 : r * 1.3
-        const h = horizontal ? r * 1.3 : r * 2.4
+      widthGrips.forEach(([gripIdx, p]) => {
+        const isActive = isCoarse && activeIdx === gripIdx
+        const r = (isActive ? grip * 1.25 : grip) * 0.8
+        const gw = r * 1.3, gh = r * 2.4
         if (isActive) {
           ctx.beginPath()
-          ctx.roundRect(p.x - w / 2 - 4, p.y - h / 2 - 4, w + 8, h + 8, Math.min(w, h) / 2 + 4)
-          ctx.strokeStyle = dotColor.replace("0.95", "0.4")
+          ctx.roundRect(p.x - gw / 2 - 4, p.y - gh / 2 - 4, gw + 8, gh + 8, Math.min(gw, gh) / 2 + 4)
+          ctx.strokeStyle = haloColor
           ctx.lineWidth = 3
           ctx.stroke()
         }
         ctx.beginPath()
-        ctx.roundRect(p.x - w / 2, p.y - h / 2, w, h, Math.min(w, h) / 2)
+        ctx.roundRect(p.x - gw / 2, p.y - gh / 2, gw, gh, Math.min(gw, gh) / 2)
         ctx.fillStyle = "white"
         ctx.fill()
         ctx.strokeStyle = dotColor
         ctx.lineWidth = 2
         ctx.stroke()
       })
+
+      // Rotate (↻, above) and swing-about-the-vertical-axis (⇆, below), each
+      // on a stem so they stay clear of the outline and of each other.
+      const stemLen = ROTATE_STEM_CSS_LEN * (isCoarse ? scale : 1)
+      const stemR = isCoarse ? ROTATE_HANDLE_CSS_RADIUS * scale * 1.3 : ROTATE_HANDLE_CSS_RADIUS
+      const drawStemGrip = (anchor: Pt, pos: Pt, glyph: string, active: boolean) => {
+        ctx.save()
+        ctx.strokeStyle = REFERENCE_COLOR
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([3, 3])
+        ctx.beginPath()
+        ctx.moveTo(anchor.x, anchor.y)
+        ctx.lineTo(pos.x, pos.y)
+        ctx.stroke()
+        ctx.restore()
+        const r = active ? stemR * 1.25 : stemR
+        if (active) {
+          ctx.beginPath()
+          ctx.arc(pos.x, pos.y, r + 5, 0, Math.PI * 2)
+          ctx.strokeStyle = "rgba(0, 229, 255, 0.55)"
+          ctx.lineWidth = 3
+          ctx.stroke()
+        }
+        ctx.beginPath()
+        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2)
+        ctx.fillStyle = "white"
+        ctx.fill()
+        ctx.strokeStyle = REFERENCE_COLOR
+        ctx.lineWidth = 2.5
+        ctx.stroke()
+        ctx.fillStyle = "#00565F"
+        ctx.font = `${Math.round(r * 1.3)}px system-ui`
+        ctx.textAlign = "center"
+        ctx.textBaseline = "middle"
+        ctx.fillText(glyph, pos.x, pos.y)
+      }
+      const stemMargin = stemR + 2
+      drawStemGrip(topMid, stemHandlePos(topMid, centroid, stemLen, W, H, stemMargin), "↻", isCoarse && activeIdx === REF_ROTATE)
+      drawStemGrip(bottomMid, stemHandlePos(bottomMid, centroid, stemLen, W, H, stemMargin), "⇆", isCoarse && activeIdx === REF_YAW)
     } else {
     {
       const ax = refPts[0].x, ay = refPts[0].y
@@ -1012,19 +904,17 @@ export default function QuadSelector({
     // placement benefits from magnification. Never while dragging a whole
     // shape's body, since that's a coarse repositioning move, not a precise
     // point placement.
-    const isEdgeIdx = activeIdx === REF_EDGE_TOP || activeIdx === REF_EDGE_RIGHT || activeIdx === REF_EDGE_BOTTOM || activeIdx === REF_EDGE_LEFT
-    const showLoupe = isCoarse && activeIdx !== null && (activeIdx < pointHandleCount || isEdgeIdx)
+    const isWidthIdx = activeIdx === REF_WIDTH_LEFT || activeIdx === REF_WIDTH_RIGHT
+    const showLoupe = isCoarse && activeIdx !== null && (activeIdx < pointHandleCount || isWidthIdx)
     if (showLoupe) {
       let activePt: { x: number; y: number }
       if (activeIdx! < quad.length) {
         activePt = pts[activeIdx!]
-      } else if (isEdgeIdx && refPts.length === 4) {
+      } else if (isWidthIdx && refPts.length === 4) {
         const [tl, tr, br, bl] = refPts
-        activePt =
-          activeIdx === REF_EDGE_TOP ? { x: (tl.x + tr.x) / 2, y: (tl.y + tr.y) / 2 } :
-          activeIdx === REF_EDGE_BOTTOM ? { x: (br.x + bl.x) / 2, y: (br.y + bl.y) / 2 } :
-          activeIdx === REF_EDGE_LEFT ? { x: (bl.x + tl.x) / 2, y: (bl.y + tl.y) / 2 } :
-          { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 }
+        activePt = activeIdx === REF_WIDTH_LEFT
+          ? { x: (bl.x + tl.x) / 2, y: (bl.y + tl.y) / 2 }
+          : { x: (tr.x + br.x) / 2, y: (tr.y + br.y) / 2 }
       } else {
         activePt = refPts[activeIdx! - quad.length]
       }
@@ -1043,9 +933,9 @@ export default function QuadSelector({
   }
 
   // Combined index space (see bodyDragIndices): 0..quad.length-1 are quad
-  // corners, then the reference's own points (ruler mode: A, B; door/brick
+  // corners, then the reference's own points (ruler mode: A, B; door outline
   // sticker mode: [TL,TR,BR,BL] — genuine point handles, just like the quad's
-  // own corners), then REF_BODY ("grab the middle of the door/brick/ruler and
+  // own corners), then REF_BODY ("grab the middle of the door/ruler and
   // move the whole thing") and QUAD_BODY ("grab anywhere inside the gold box
   // and move it") — shared so a single pointer-tracking codepath
   // (findHandle/onDown/onMove/onHover/onUp) drives all of them. Priority:
@@ -1055,11 +945,11 @@ export default function QuadSelector({
   function findHandle(x: number, y: number, W: number, H: number, canvas: HTMLCanvasElement, coarse: boolean): number | null {
     const quad = quadRef.current
     const reference = referenceRef.current
-    const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
+    const { REF_WIDTH_LEFT, REF_WIDTH_RIGHT, REF_ROTATE, REF_YAW, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
       bodyDragIndices(quad.length, showReference, reference.length)
 
     // Point handles: quad corners, plus (when visible) every reference point
-    // — 2 for ruler mode, 4 for door/brick sticker mode. Once ratio-locked,
+    // — 2 for ruler mode, 4 for door outline mode. Once ratio-locked,
     // the quad's own corners are excluded (start past quad.length) — they're
     // no longer individually draggable, the lock handles below take over.
     const pointHandles: QuadPoint[] = !showReference
@@ -1087,27 +977,28 @@ export default function QuadSelector({
     }
     if (hit !== null) return hit
 
-    if (showReference && reference.length === 4) {
-      // Edge-midpoint handles: drag one edge to resize just that dimension
-      // (keeping the shape rectangular) instead of dragging a corner (which
-      // skews it) — the easier, more predictable option for the common case
-      // of a straight-on photo and a straight door.
+    if (showReference && isStickerMode && reference.length === 4) {
+      // Width pills and the rotate/swing stem grips — everything the outline
+      // can do that isn't "scale it" (the corners) or "move it" (the body).
       const [tl, tr, br, bl] = reference.map(p => ({ x: p.x * W, y: p.y * H }))
-      const mid = (a: { x: number; y: number }, b: { x: number; y: number }) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
-      const edgeMidpoints: [number, { x: number; y: number }][] = [
-        [REF_EDGE_TOP, mid(tl, tr)],
-        [REF_EDGE_RIGHT, mid(tr, br)],
-        [REF_EDGE_BOTTOM, mid(br, bl)],
-        [REF_EDGE_LEFT, mid(bl, tl)],
+      const mid = (a: Pt, b: Pt): Pt => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
+      const centroid = { x: (tl.x + tr.x + br.x + bl.x) / 4, y: (tl.y + tr.y + br.y + bl.y) / 4 }
+      const stemLen = ROTATE_STEM_CSS_LEN * (coarse ? canvasScale(canvas) : 1)
+      const stemMargin = (coarse ? ROTATE_HANDLE_CSS_RADIUS * canvasScale(canvas) * 1.3 : ROTATE_HANDLE_CSS_RADIUS) + 2
+      const grips: [number, Pt][] = [
+        [REF_WIDTH_LEFT, mid(bl, tl)],
+        [REF_WIDTH_RIGHT, mid(tr, br)],
+        [REF_ROTATE, stemHandlePos(mid(tl, tr), centroid, stemLen, W, H, stemMargin)],
+        [REF_YAW, stemHandlePos(mid(bl, br), centroid, stemLen, W, H, stemMargin)],
       ]
       const tolerance = (coarse ? TOUCH_HIT_CSS_RADIUS : HANDLE_RADIUS * 1.8) * (coarse ? canvasScale(canvas) : 1)
       let nearestDist = Infinity
-      let edgeHit: number | null = null
-      for (const [idx, p] of edgeMidpoints) {
+      let gripHit: number | null = null
+      for (const [idx, p] of grips) {
         const dist = Math.hypot(x - p.x, y - p.y)
-        if (dist <= tolerance && dist < nearestDist) { nearestDist = dist; edgeHit = idx }
+        if (dist <= tolerance && dist < nearestDist) { nearestDist = dist; gripHit = idx }
       }
-      if (edgeHit !== null) return edgeHit
+      if (gripHit !== null) return gripHit
     }
 
     // Ratio-locked resize/rotate handles — checked before the whole-quad body
@@ -1135,7 +1026,7 @@ export default function QuadSelector({
     if (!showReference) return null
 
     if (reference.length === 4) {
-      // Door/brick sticker: grab anywhere inside its quad to move the whole thing.
+      // Door outline: grab anywhere inside its quad to move the whole thing.
       const refPts = reference.map(p => ({ x: p.x * W, y: p.y * H }))
       if (pointInPolygon(x, y, refPts)) return REF_BODY
       return null
@@ -1158,15 +1049,39 @@ export default function QuadSelector({
       e.preventDefault()
       const canvas = canvasRef.current
       if (!canvas) return
-      canvas.setPointerCapture(e.pointerId)
+      // Guarded: some input sources (or a stale/already-released pointerId)
+      // can throw NotFoundError here — losing capture just means a drag that
+      // strays off-canvas won't keep tracking, not a broken drag outright.
+      try { canvas.setPointerCapture(e.pointerId) } catch { /* no-op */ }
       const { x, y } = getCanvasCoords(e, canvas)
       const W = canvas.width, H = canvas.height
       const idx = findHandle(x, y, W, H, canvas, isCoarse)
       draggingRef.current = idx
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
+      const { REF_WIDTH_LEFT, REF_WIDTH_RIGHT, REF_ROTATE, REF_YAW, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quadRef.current.length, showReference, referenceRef.current.length)
-      if (idx === QUAD_BODY || idx === REF_BODY || idx === REF_EDGE_TOP || idx === REF_EDGE_RIGHT || idx === REF_EDGE_BOTTOM || idx === REF_EDGE_LEFT) {
+      if (idx === QUAD_BODY || idx === REF_BODY) {
         bodyDragLastRef.current = { x: x / canvas.width, y: y / canvas.height }
+      }
+
+      // Freeze the outline's parameters for whichever of its grips was taken —
+      // scale (any corner), width (side pills), rotate or swing (stem grips).
+      refDragRef.current = null
+      const refPointStart = quadRef.current.length
+      const isRefCorner = idx !== null && idx >= refPointStart && idx < refPointStart + referenceRef.current.length
+      if (isStickerMode && idx !== null &&
+          (isRefCorner || idx === REF_WIDTH_LEFT || idx === REF_WIDTH_RIGHT || idx === REF_ROTATE || idx === REF_YAW)) {
+        const p = refParamsRef.current
+        const offset = vecSub({ x, y }, { x: p.cx * W, y: p.cy * H })
+        refDragRef.current = {
+          kind: idx === REF_ROTATE ? "rotate"
+            : idx === REF_YAW ? "yaw"
+            : (idx === REF_WIDTH_LEFT || idx === REF_WIDTH_RIGHT) ? "width"
+            : "scale",
+          start: { ...p },
+          startDist: Math.max(vecLen(offset), 1),
+          startAngle: Math.atan2(offset.y, offset.x),
+          startRelX: vecRotate(offset, -p.rot).x,
+        }
       }
 
       // Snapshot the drag-start geometry for the locked resize/rotate
@@ -1221,7 +1136,7 @@ export default function QuadSelector({
       const H = canvas.height
       const idx = draggingRef.current
       // Quad corners/body stay clamped to the visible photo. Reference points
-      // (door/brick/ruler) are NOT clamped — a real object can sit partially
+      // (door/ruler) are NOT clamped — a real object can sit partially
       // outside a tightly-cropped photo, so the client needs to be able to
       // drag the reference past the edge to match what's actually visible.
       const point = {
@@ -1231,18 +1146,42 @@ export default function QuadSelector({
       const rawPoint = { x: x / W, y: y / H }
       const quad = quadRef.current
       const reference = referenceRef.current
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
+      // The reference's own grips are dispatched off refDragRef.kind below,
+      // not off their indices, so only the quad's indices are needed here.
+      const { REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quad.length, showReference, reference.length)
 
-      // Which two of the reference's [TL,TR,BR,BL] corners move together for
-      // each edge handle — moving both by the same delta resizes just that
-      // dimension while keeping the shape rectangular, unlike dragging a lone
-      // corner (which is a deliberate skew for an angled photo).
-      const edgePairs: Record<number, [number, number]> = {
-        [REF_EDGE_TOP]: [0, 1],
-        [REF_EDGE_RIGHT]: [1, 2],
-        [REF_EDGE_BOTTOM]: [2, 3],
-        [REF_EDGE_LEFT]: [3, 0],
+      // Reference sticker grips — every one of these edits the parameters and
+      // re-projects, so the outline can only ever be a real rectangle viewed
+      // from some real camera position, never an arbitrary skew.
+      const refDrag = refDragRef.current
+      if (isStickerMode && refDrag) {
+        const s = refDrag.start
+        const center = { x: s.cx * W, y: s.cy * H }
+        const offset = vecSub({ x, y }, center)
+        const next = { ...s }
+        if (refDrag.kind === "scale") {
+          const factor = vecLen(offset) / refDrag.startDist
+          next.h = Math.min(MAX_REF_H, Math.max(MIN_REF_H, s.h * factor))
+          next.w = Math.max(MIN_REF_W, s.w * (next.h / s.h))
+        } else if (refDrag.kind === "rotate") {
+          next.rot = s.rot + (Math.atan2(offset.y, offset.x) - refDrag.startAngle)
+        } else {
+          // Work in the shape's own un-rotated frame, and measure against where
+          // the grip was picked up, so grabbing it off-center doesn't jump.
+          const relX = vecRotate(offset, -s.rot).x
+          if (refDrag.kind === "width") {
+            next.w = Math.max(MIN_REF_W, s.w * (Math.abs(relX) / Math.max(Math.abs(refDrag.startRelX), 1)))
+          } else {
+            const span = Math.max(s.h * H * 1.1, 90)
+            const swing = s.yaw + ((relX - refDrag.startRelX) / span) * MAX_YAW
+            next.yaw = Math.max(-MAX_YAW, Math.min(MAX_YAW, swing))
+          }
+        }
+        refParamsRef.current = next
+        referenceRef.current = refQuadFromParams(next, W, H)
+        scheduleDraw()
+        return
       }
 
       if (idx < quad.length) {
@@ -1334,34 +1273,24 @@ export default function QuadSelector({
         if (last) {
           const dx = rawPoint.x - last.x
           const dy = rawPoint.y - last.y
-          for (let i = 0; i < reference.length; i++) {
-            reference[i] = { x: reference[i].x + dx, y: reference[i].y + dy }
+          if (isStickerMode) {
+            const p = refParamsRef.current
+            refParamsRef.current = { ...p, cx: p.cx + dx, cy: p.cy + dy }
+            referenceRef.current = refQuadFromParams(refParamsRef.current, W, H)
+          } else {
+            for (let i = 0; i < reference.length; i++) {
+              reference[i] = { x: reference[i].x + dx, y: reference[i].y + dy }
+            }
           }
           bodyDragLastRef.current = rawPoint
         }
-      } else if (idx in edgePairs) {
-        // Edge-midpoint drag: move both of that edge's corners by the same
-        // delta, so the shape stays rectangular while just one dimension
-        // resizes — the easier, predictable option for a straight-on photo
-        // of a straight door, vs. dragging a lone corner (which skews it).
-        const last = bodyDragLastRef.current
-        if (last) {
-          const dx = rawPoint.x - last.x
-          const dy = rawPoint.y - last.y
-          const [i1, i2] = edgePairs[idx]
-          reference[i1] = { x: reference[i1].x + dx, y: reference[i1].y + dy }
-          reference[i2] = { x: reference[i2].x + dx, y: reference[i2].y + dy }
-          bodyDragLastRef.current = rawPoint
-        }
-      } else {
-        // Individual reference point — ruler mode's A/B, or one corner of the
-        // door/brick sticker quad. Unclamped, and (sticker mode) fully free
-        // to move independently, so the quad can be skewed to match an
-        // object photographed at an angle instead of always staying a
-        // fixed-ratio rectangle.
+      } else if (!isStickerMode) {
+        // Ruler mode's A/B endpoints — still freely placeable, since a
+        // custom reference object is just a length between two marks.
+        // Unclamped: the object can sit partly outside a tight crop.
         reference[idx - quad.length] = rawPoint
       }
-      draw()
+      scheduleDraw()
     }
 
     // Cursor affordance on desktop (hover, no drag)
@@ -1372,16 +1301,17 @@ export default function QuadSelector({
       const { x, y } = getCanvasCoords(e, canvas)
       const idx = findHandle(x, y, canvas.width, canvas.height, canvas, false)
       const quad = quadRef.current
-      const { REF_EDGE_TOP, REF_EDGE_RIGHT, REF_EDGE_BOTTOM, REF_EDGE_LEFT, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
+      const { REF_WIDTH_LEFT, REF_WIDTH_RIGHT, REF_ROTATE, REF_YAW, REF_BODY, QUAD_BODY, QUAD_RESIZE_A, QUAD_RESIZE_B, QUAD_ROTATE } =
         bodyDragIndices(quad.length, showReference, referenceRef.current.length)
-      if (idx === REF_EDGE_TOP || idx === REF_EDGE_BOTTOM) {
-        canvas.style.cursor = "ns-resize"
-      } else if (idx === REF_EDGE_LEFT || idx === REF_EDGE_RIGHT) {
+      const refPointStart = quad.length
+      if (idx === REF_WIDTH_LEFT || idx === REF_WIDTH_RIGHT || idx === REF_YAW) {
         canvas.style.cursor = "ew-resize"
       } else if (idx === QUAD_RESIZE_A || idx === QUAD_RESIZE_B) {
         canvas.style.cursor = "nwse-resize"
-      } else if (idx === QUAD_ROTATE) {
+      } else if (idx === QUAD_ROTATE || idx === REF_ROTATE) {
         canvas.style.cursor = "grab"
+      } else if (isStickerMode && idx !== null && idx >= refPointStart && idx < refPointStart + referenceRef.current.length) {
+        canvas.style.cursor = "nwse-resize"
       } else if (idx === REF_BODY || idx === QUAD_BODY) {
         canvas.style.cursor = "move"
       } else if (idx !== null) {
@@ -1407,6 +1337,14 @@ export default function QuadSelector({
       draggingRef.current = null
       bodyDragLastRef.current = null
       lockDragRef.current = null
+      refDragRef.current = null
+      // Drop any still-pending scheduled frame from the last onMove — this
+      // synchronous draw() already reflects the final, settled state, so
+      // that frame would only be a redundant no-op redraw.
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current)
+        dragRafRef.current = null
+      }
       draw()
     }
 
@@ -1422,8 +1360,12 @@ export default function QuadSelector({
       canvas.removeEventListener("pointermove", onHover)
       window.removeEventListener("pointerup", onUp)
       window.removeEventListener("pointercancel", onUp)
+      if (dragRafRef.current !== null) {
+        cancelAnimationFrame(dragRafRef.current)
+        dragRafRef.current = null
+      }
     }
-  }, [getCanvasCoords, onChange, onReferenceChange, isCoarse, referenceIcon, showReference, isLocked, corner, lockedAspectRatio, lockedFrontRatio, lockedSideRatio])
+  }, [onChange, onReferenceChange, isCoarse, referenceIcon, showReference, isLocked, corner, lockedAspectRatio, lockedFrontRatio, lockedSideRatio])
 
   useEffect(() => { draw() })
 

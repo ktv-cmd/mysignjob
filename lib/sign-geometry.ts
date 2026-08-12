@@ -128,12 +128,21 @@ function pseudoImgDims(aspectRatio: number): ImgDims {
   return { w: aspectRatio, h: 1 }
 }
 
+// `referenceAssumed` means the client accepted a suggested real-world size
+// (e.g. the 80" default for a door) rather than measuring the object. That is
+// an unbounded source of error the pixel math cannot see — real storefront
+// doors run 78-84"+, so a wrong assumption skews every derived dimension by
+// the same percentage while every geometric signal still looks perfect. The
+// confidence tier is capped at "medium" in that case so `width_confidence`,
+// which the sign companies quote against, never reports certainty we don't
+// have. See computeConfidence below.
 export function computeSignDimensions(
   quad: GeoPoint[] | null,
   reference: GeoPoint[] | null,
   referenceInches: number,
   imgDims: ImgDims | null,
-  referenceType?: string
+  referenceType?: string,
+  referenceAssumed = false
 ): SignDimensions | null {
   if (!quad || !reference || !imgDims) return null
   if (!(reference.length === 2 || reference.length === 4)) return null
@@ -180,12 +189,7 @@ export function computeSignDimensions(
   }
   const angleWarning = qpd.angleWarning || refAngleWarning
 
-  const confidence: "high" | "medium" | "low" =
-    refPx > HIGH_CONFIDENCE_REFERENCE_PX && !angleWarning
-      ? "high"
-      : refPx > HIGH_CONFIDENCE_REFERENCE_PX || !angleWarning
-      ? "medium"
-      : "low"
+  const confidence = computeConfidence(refPx, angleWarning, referenceAssumed)
 
   return {
     widthInches: round1(widthInches),
@@ -203,6 +207,24 @@ export function computeSignDimensions(
 
 function round1(n: number): number {
   return Math.round(n * 10) / 10
+}
+
+// Geometric signals (how long the reference is on screen, how distorted the
+// shapes look) decide the tier — but an assumed reference size is capped at
+// "medium" no matter how clean the geometry is, because that error is
+// invisible to every geometric check here.
+export function computeConfidence(
+  refPx: number,
+  angleWarning: boolean,
+  referenceAssumed: boolean
+): "high" | "medium" | "low" {
+  const geometric: "high" | "medium" | "low" =
+    refPx > HIGH_CONFIDENCE_REFERENCE_PX && !angleWarning
+      ? "high"
+      : refPx > HIGH_CONFIDENCE_REFERENCE_PX || !angleWarning
+      ? "medium"
+      : "low"
+  return referenceAssumed && geometric === "high" ? "medium" : geometric
 }
 
 // ─── Aspect-ratio lock ──────────────────────────────────────────────────────

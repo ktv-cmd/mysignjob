@@ -41,21 +41,34 @@ export default function InsurancePage() {
       <StepHeader step={3} />
 
       <div className="mt-6 space-y-6">
-        <div className="border-2 border-dashed border-border rounded-xl p-8 text-center">
+        <div className="border-2 border-dashed border-border rounded-2xl p-8 text-center">
           {file ? (
             <div className="space-y-2">
               <p className="font-medium text-sm">{file.name}</p>
               <p className="text-xs text-muted-foreground">{(file.size / 1024).toFixed(0)} KB</p>
               <button
                 onClick={() => { setFile(null); setResult(null); setStatus("idle") }}
-                className="text-xs text-red-500 hover:underline"
+                className="text-xs text-destructive hover:underline"
               >
                 Remove
               </button>
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="text-4xl">📄</div>
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-9 w-9 mx-auto"
+                style={{ color: "var(--color-brand-indigo)" }}
+                aria-hidden
+              >
+                <path d="M7 3h7l5 5v13a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z" />
+                <path d="M14 3v5h5M9 13h6M9 17h6" />
+              </svg>
               <p className="text-sm font-medium">Upload your Certificate of Insurance</p>
               <p className="text-xs text-muted-foreground">PDF or image (JPG/PNG). Max 10MB.</p>
               <button
@@ -79,24 +92,27 @@ export default function InsurancePage() {
           <button
             onClick={handleUpload}
             disabled={status === "uploading"}
-            className="w-full bg-accent text-accent-foreground rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+            className="rounded-full w-full text-white py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
           >
             {status === "uploading" ? "Verifying with AI…" : "Verify Insurance"}
           </button>
         )}
 
         {error && (
-          <div className="border border-red-200 bg-red-50 rounded-xl p-4">
-            <p className="text-sm text-red-700 font-medium">Upload failed</p>
-            <p className="text-sm text-red-600 mt-1">{error}</p>
+          <div className="border border-destructive/30 bg-destructive/10 rounded-2xl p-4">
+            <p className="text-sm text-destructive font-medium">Upload failed</p>
+            <p className="text-sm text-destructive/90 mt-1">{error}</p>
           </div>
         )}
 
         {result && (
-          <div className={`border rounded-xl p-5 space-y-3 ${verified ? "border-green-200 bg-green-50" : "border-orange-200 bg-orange-50"}`}>
+          <div className={`border rounded-2xl p-5 space-y-3 ${verified ? "border-success/30 bg-success/10" : "border-amber-500/30 bg-amber-500/10"}`}>
             <div className="flex items-center gap-2">
-              <span className="text-lg">{verified ? "✅" : "⚠️"}</span>
-              <p className={`font-semibold text-sm ${verified ? "text-green-800" : "text-orange-800"}`}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={`h-4.5 w-4.5 flex-shrink-0 ${verified ? "text-success" : "text-amber-600 dark:text-amber-400"}`} aria-hidden>
+                {verified ? <path d="M4 12l5 5L20 6" /> : <><path d="M12 3l10 18H2z" /><path d="M12 10v4M12 17.5v.01" /></>}
+              </svg>
+              <p className={`font-semibold text-sm ${verified ? "text-success" : "text-amber-700 dark:text-amber-400"}`}>
                 {verified ? "Insurance verified successfully" : "Issues found — please resolve"}
               </p>
             </div>
@@ -117,7 +133,7 @@ export default function InsurancePage() {
             {hasIssues && (
               <ul className="space-y-1">
                 {result.issues.map((issue: string, i: number) => (
-                  <li key={i} className="text-xs text-orange-700 flex items-start gap-1">
+                  <li key={i} className="text-xs text-amber-700 dark:text-amber-400 flex items-start gap-1">
                     <span>•</span><span>{issue}</span>
                   </li>
                 ))}
@@ -138,7 +154,8 @@ export default function InsurancePage() {
         {verified && (
           <button
             onClick={() => router.push("/sc/onboarding/stripe")}
-            className="w-full bg-accent text-accent-foreground rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+            className="rounded-full w-full text-white py-2.5 text-sm font-semibold hover:opacity-90 transition-opacity"
+            style={{ backgroundImage: "var(--gradient-brand)" }}
           >
             Continue to Payout Setup →
           </button>
@@ -184,7 +201,7 @@ function StepHeader({ step }: { step: number }) {
           )
         })}
       </div>
-      <h1 className="text-2xl font-bold">Insurance Certificate</h1>
+      <h1 className="text-2xl font-semibold">Insurance Certificate</h1>
       <p className="text-muted-foreground mt-1">
         Upload your Certificate of Insurance. Our AI verifies coverage automatically.
       </p>

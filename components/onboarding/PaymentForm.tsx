@@ -81,7 +81,7 @@ function CardForm() {
       <button
         type="submit"
         disabled={!stripe || submitting}
-        className="w-full bg-accent text-accent-foreground rounded-lg py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
+        className="w-full bg-accent text-accent-foreground rounded-2xl py-2.5 text-sm font-semibold hover:opacity-90 disabled:opacity-50 transition-opacity"
       >
         {submitting ? "Saving…" : "Save card & continue"}
       </button>

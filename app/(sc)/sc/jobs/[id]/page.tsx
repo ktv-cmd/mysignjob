@@ -41,27 +41,27 @@ export default async function SCJobPage({ params }: { params: Promise<{ id: stri
   return (
     <div className="max-w-2xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">{order?.sign_spec?.business_name ?? "Job"}</h1>
+        <h1 className="text-2xl font-semibold">{order?.sign_spec?.business_name ?? "Job"}</h1>
         <p className="text-muted-foreground mt-1 capitalize">
           {order?.sign_spec?.sign_type?.replace(/_/g, " ")} · Status: {job.status}
         </p>
       </div>
 
       {job.status === "revision" && job.client_revision_notes && (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
-          <p className="font-semibold text-amber-800 text-sm">Client requested changes</p>
-          <p className="text-sm text-amber-700 mt-1 whitespace-pre-wrap">{job.client_revision_notes}</p>
+        <div className="bg-amber-500/10 dark:bg-amber-500/15 border border-amber-500/30 rounded-2xl p-4">
+          <p className="font-semibold text-amber-700 dark:text-amber-400 text-sm">Client requested changes</p>
+          <p className="text-sm text-amber-700/90 dark:text-amber-400/90 mt-1 whitespace-pre-wrap">{job.client_revision_notes}</p>
         </div>
       )}
 
       {job.status === "submitted" && (
-        <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-blue-800 text-sm">
+        <div className="border border-border rounded-2xl p-4 text-sm" style={{ backgroundColor: "#4C7FB314", color: "var(--color-brand-sky)" }}>
           Waiting for the client to review your installation photos.
         </div>
       )}
 
       {job.status === "completed" && (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 text-green-800 text-sm">
+        <div className="bg-success/10 dark:bg-success/15 border border-success/30 rounded-2xl p-4 text-success text-sm">
           Job completed — final payment has been processed.
         </div>
       )}
@@ -72,26 +72,26 @@ export default async function SCJobPage({ params }: { params: Promise<{ id: stri
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">Storefront Photo</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={order.storefront_photo_url} alt="Storefront" className="rounded-xl border border-border w-full" />
+              <img src={order.storefront_photo_url} alt="Storefront" className="rounded-2xl border border-border w-full" />
             </div>
           )}
           {order?.ai_preview_url && (
             <div className="space-y-1">
               <p className="text-xs font-medium text-muted-foreground">AI Preview</p>
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={order.ai_preview_url} alt="AI Preview" className="rounded-xl border border-border w-full" />
+              <img src={order.ai_preview_url} alt="AI Preview" className="rounded-2xl border border-border w-full" />
             </div>
           )}
         </div>
       )}
 
-      <div className="bg-card border border-border rounded-xl p-6 space-y-4">
+      <div className="bg-card border border-border/70 rounded-2xl shadow-soft p-6 space-y-4">
         <h2 className="font-semibold">Installation Photos</h2>
         {job.install_photos && job.install_photos.length > 0 ? (
           <div className="grid grid-cols-3 gap-2">
             {job.install_photos.map((url, i) => (
               // eslint-disable-next-line @next/next/no-img-element
-              <img key={url} src={url} alt={`Install photo ${i + 1}`} className="rounded-lg border border-border w-full aspect-square object-cover" />
+              <img key={url} src={url} alt={`Install photo ${i + 1}`} className="rounded-2xl border border-border w-full aspect-square object-cover" />
             ))}
           </div>
         ) : (

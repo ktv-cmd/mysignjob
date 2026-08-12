@@ -17,7 +17,7 @@ function LoginForm() {
         {next && <input type="hidden" name="next" value={next} />}
         <Field label="Email" name="email" type="email" autoComplete="email" required />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />
-        {state?.error && <p className="text-sm text-red-600">{state.error}</p>}
+        {state?.error && <p className="text-sm text-destructive">{state.error}</p>}
         <SubmitButton pending={pending}>Log in</SubmitButton>
       </form>
       <p className="text-sm text-muted-foreground text-center mt-6">

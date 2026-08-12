@@ -19,8 +19,8 @@ export default async function PaymentPage() {
   return (
     <div className="max-w-md mx-auto py-12">
       <div className="mb-6">
-        <p className="text-sm text-muted-foreground">Step 2 of 2</p>
-        <h1 className="text-2xl font-bold mt-1">Add a payment method</h1>
+        <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Step 2 of 2</p>
+        <h1 className="text-2xl font-semibold mt-1">Add a payment method</h1>
         <p className="text-muted-foreground mt-1">
           We securely save your card now. You&apos;re only charged the 50% deposit once a sign
           company is assigned to your order.

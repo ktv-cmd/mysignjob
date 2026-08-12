@@ -1,17 +1,16 @@
 import { createClient } from "@/lib/supabase/server"
 import { redirect } from "next/navigation"
 import Link from "next/link"
-import Image from "next/image"
 import ThemeToggle from "@/components/shared/ThemeToggle"
 import BrandLogo from "@/components/shared/BrandLogo"
 import CompareSlider from "@/components/home/CompareSlider"
 
-// "Fabrication ticket" redesign — sharp 3px corners, hairline dividers, Big
-// Shoulders Display headlines, IBM Plex Sans body. Header/hero/CTA band are
-// deliberately always-dark (var(--color-ink)) regardless of the site's own
-// light/dark toggle — dark bands framing a theme-adaptive middle, not a
-// literal light/dark switch of every section.
-const DISPLAY_FONT = "var(--font-big-shoulders)"
+// Soft, Apple-leaning redesign — generous rounded corners, floating cards
+// with soft shadows instead of hairline grids, Sora headlines in sentence
+// case. Every section, including the header/hero/CTA band, follows the
+// site's light/dark toggle via the theme tokens (bg-background,
+// text-foreground, etc.) rather than a fixed color, so switching themes
+// actually changes the whole page.
 
 const STEPS = [
   {
@@ -73,33 +72,33 @@ export default async function Home() {
 
   // Marketing landing page for unauthenticated users
   return (
-    <div className="min-h-screen bg-background" style={{ fontFamily: "var(--font-plex-sans)" }}>
-      <header className="sticky top-0 z-40 border-b border-white/10" style={{ backgroundColor: "var(--color-ink)" }}>
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-40 border-b border-border/70 bg-background/90 backdrop-blur-md">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
           <Link href="/" className="flex items-center">
-            <Image src="/brand/logo-horizontal-dark.png" alt="Mysignjobs.com" width={150} height={44} className="h-7 w-auto" priority />
+            <BrandLogo className="h-7 w-auto" priority />
           </Link>
           <nav className="flex items-center gap-7">
-            <a href="#how" className="hidden sm:inline text-sm font-medium text-white/60 hover:text-white transition-colors">How it works</a>
-            <a href="#trust" className="hidden sm:inline text-sm font-medium text-white/60 hover:text-white transition-colors">Why us</a>
-            <Link href="/login" className="text-sm font-medium text-white/60 hover:text-white transition-colors">Log in</Link>
+            <a href="#how" className="hidden sm:inline text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">How it works</a>
+            <a href="#trust" className="hidden sm:inline text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Why us</a>
+            <Link href="/login" className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">Log in</Link>
             <Link
               href="/register"
-              className="rounded-[3px] px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-opacity"
+              className="rounded-full px-5 py-2.5 text-sm font-semibold text-white hover:opacity-90 transition-opacity shadow-soft"
               style={{ backgroundImage: "var(--gradient-brand)" }}
             >
               Get Started
             </Link>
-            <ThemeToggle className="flex h-8 w-8 items-center justify-center rounded-lg text-white/60 hover:text-white hover:bg-white/10 transition-colors" />
+            <ThemeToggle />
           </nav>
         </div>
       </header>
 
       {/* ── Hero ── */}
-      <section className="py-20 sm:py-24" style={{ backgroundColor: "var(--color-ink)" }}>
+      <section className="py-20 sm:py-24">
         <div className="container mx-auto px-4 grid lg:grid-cols-[1.05fr_1fr] gap-12 lg:gap-14 items-center">
           <div>
-            <div className="flex items-center gap-2.5 mb-5 text-xs font-semibold uppercase tracking-[0.16em] text-white/55">
+            <div className="flex items-center gap-2.5 mb-5 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
               <span
                 aria-hidden
                 className="h-1.5 w-1.5 rounded-full"
@@ -108,41 +107,41 @@ export default async function Home() {
               Upload · Preview · Get Quotes
             </div>
             <h1
-              className="uppercase font-black text-white mb-6 text-balance"
-              style={{ fontFamily: DISPLAY_FONT, fontSize: "clamp(2.5rem, 1.4rem + 4.5vw, 4.6rem)", lineHeight: 0.94, letterSpacing: "0.01em" }}
+              className="font-semibold text-foreground mb-6 text-balance"
+              style={{ fontSize: "clamp(2.5rem, 1.4rem + 4.5vw, 4.4rem)", lineHeight: 1.06, letterSpacing: "-0.02em" }}
             >
               See your sign<br />
               <span className="bg-clip-text text-transparent" style={{ backgroundImage: "var(--gradient-brand)" }}>
                 before you build it.
               </span>
             </h1>
-            <p className="text-white/60 mb-8 leading-relaxed max-w-md text-lg text-balance">
+            <p className="text-muted-foreground mb-8 leading-relaxed max-w-md text-lg text-balance">
               Upload a photo of your storefront. Our AI renders your new sign on the actual building in seconds — then vetted local sign companies bid on the job.
             </p>
             <div className="flex flex-col sm:flex-row items-stretch sm:items-start gap-3.5 mb-10">
               <Link
                 href="/order/new"
-                className="rounded-[3px] px-8 py-3.5 text-base font-semibold text-white text-center hover:opacity-90 transition-opacity"
+                className="rounded-full px-8 py-3.5 text-base font-semibold text-white text-center hover:opacity-90 transition-opacity shadow-soft"
                 style={{ backgroundImage: "var(--gradient-brand)" }}
               >
                 Get Your Sign →
               </Link>
               <Link
                 href="/sc/register"
-                className="rounded-[3px] border border-white/25 px-8 py-3.5 text-base font-medium text-white text-center hover:border-white/50 transition-colors"
+                className="rounded-full border border-border px-8 py-3.5 text-base font-medium text-foreground text-center hover:border-foreground/40 hover:bg-muted/40 transition-colors"
               >
                 I&apos;m a Sign Company
               </Link>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3.5 sm:gap-0 border-t border-white/10 pt-5">
+            <div className="flex flex-col sm:flex-row gap-3.5 sm:gap-0 border-t border-border/70 pt-5">
               {[
                 { k: "Preview", v: "AI-rendered, on your wall" },
                 { k: "Bidders", v: "Vetted local companies" },
                 { k: "Payment", v: "Escrow-protected" },
               ].map((t, i) => (
-                <div key={t.k} className={`flex-1 sm:pr-5 ${i < 2 ? "sm:border-r sm:border-white/10" : ""}`}>
-                  <div className="text-[11px] font-semibold uppercase tracking-wide text-white/50 mb-1.5">{t.k}</div>
-                  <div className="text-sm font-medium text-white">{t.v}</div>
+                <div key={t.k} className={`flex-1 sm:pr-5 ${i < 2 ? "sm:border-r sm:border-border" : ""}`}>
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">{t.k}</div>
+                  <div className="text-sm font-medium text-foreground">{t.v}</div>
                 </div>
               ))}
             </div>
@@ -160,17 +159,17 @@ export default async function Home() {
         <div className="container mx-auto px-4">
           <div className="max-w-xl mb-12">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">The process</p>
-            <h2 className="font-black text-3xl sm:text-4xl mb-3.5" style={{ fontFamily: DISPLAY_FONT }}>
+            <h2 className="font-semibold text-3xl sm:text-4xl mb-3.5" style={{ letterSpacing: "-0.02em" }}>
               Three steps, one job ticket.
             </h2>
             <p className="text-muted-foreground leading-relaxed">
               No showroom visits, no guesswork. Everything from first photo to final install runs through one job file.
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-px overflow-hidden rounded-[3px] border border-border bg-border">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {STEPS.map((s) => (
-              <div key={s.num} className="bg-background p-7">
-                <div className="font-black text-4xl mb-4" style={{ fontFamily: DISPLAY_FONT, color: "var(--color-border)" }}>
+              <div key={s.num} className="bg-card border border-border/70 rounded-2xl shadow-soft p-7">
+                <div className="font-semibold text-3xl mb-4" style={{ color: "var(--color-border)" }}>
                   {s.num}
                 </div>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-8.5 w-8.5 mb-4" style={{ color: "var(--color-brand-indigo)" }}>
@@ -193,13 +192,13 @@ export default async function Home() {
         <div className="container mx-auto px-4">
           <div className="max-w-xl mb-12">
             <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground mb-3">Why Mysignjobs.com</p>
-            <h2 className="font-black text-3xl sm:text-4xl" style={{ fontFamily: DISPLAY_FONT }}>
+            <h2 className="font-semibold text-3xl sm:text-4xl" style={{ letterSpacing: "-0.02em" }}>
               Built like a fabrication shop, not an ad platform.
             </h2>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-px overflow-hidden rounded-[3px] border border-border bg-border">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             {TRUST.map((t) => (
-              <div key={t.title} className="bg-background p-7">
+              <div key={t.title} className="bg-card border border-border/70 rounded-2xl shadow-soft p-7">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" className="h-6.5 w-6.5 mb-3.5" style={{ color: "var(--color-brand-plum)" }}>
                   {t.icon}
                 </svg>
@@ -212,23 +211,23 @@ export default async function Home() {
       </section>
 
       {/* ── CTA band ── */}
-      <section className="relative py-20 text-center overflow-hidden" style={{ backgroundColor: "var(--color-ink)" }}>
+      <section className="relative py-20 text-center overflow-hidden border-t border-border/70">
         <div
           aria-hidden
-          className="absolute left-1/2 -top-40 h-80 w-[640px] -translate-x-1/2 opacity-35 blur-[90px]"
+          className="absolute left-1/2 -top-40 h-80 w-[640px] -translate-x-1/2 opacity-25 blur-[110px]"
           style={{ backgroundImage: "var(--gradient-brand)" }}
         />
         <div className="relative container mx-auto px-4">
           <h2
-            className="font-black uppercase text-white mb-4 text-balance"
-            style={{ fontFamily: DISPLAY_FONT, fontSize: "clamp(2rem, 1.2rem + 3vw, 3.5rem)", lineHeight: 1 }}
+            className="font-semibold text-foreground mb-4 text-balance"
+            style={{ fontSize: "clamp(2rem, 1.2rem + 3vw, 3.4rem)", lineHeight: 1.08, letterSpacing: "-0.02em" }}
           >
             Ready to see it<br />on your wall?
           </h2>
-          <p className="text-white/60 mb-8">Upload a photo and get your first AI preview in under a minute.</p>
+          <p className="text-muted-foreground mb-8">Upload a photo and get your first AI preview in under a minute.</p>
           <Link
             href="/order/new"
-            className="inline-block rounded-[3px] px-8 py-3.5 text-base font-semibold text-white hover:opacity-90 transition-opacity"
+            className="inline-block rounded-full px-8 py-3.5 text-base font-semibold text-white hover:opacity-90 transition-opacity shadow-soft-lg"
             style={{ backgroundImage: "var(--gradient-brand)" }}
           >
             Get Your Sign →

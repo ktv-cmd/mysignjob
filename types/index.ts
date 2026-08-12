@@ -71,17 +71,6 @@ export interface SunbrellaFabric {
   common?: boolean // true = shown in the default 12-color grid
 }
 
-// Deterministic read of an uploaded logo's fabrication complexity — only matters
-// for the Letters category (channel letters need flat, separable, low-color art).
-// Awning and Light Box render any logo directly, so they ignore this.
-export interface LogoAnalysis {
-  distinct_colors: number
-  has_transparency: boolean
-  complexity: "simple" | "moderate" | "complex"
-  letters_feasible: boolean          // true = fabricable as channel letters
-  recommended_fabrication: "channel_letters" | "light_box"
-}
-
 export interface SignSpec {
   sign_type: SignType
   width_inches: number   // total developed width (= front + side for corner signs)
@@ -137,7 +126,21 @@ export interface SignSpec {
   brand_mode?: "text-only" | "logo-only" | "logo-and-text"
   logo_url?: string | null
   logo_includes_name?: boolean   // client-confirmed: logo already renders the business name, so don't add it again
-  logo_analysis?: LogoAnalysis   // deterministic complexity read, used to recommend letters vs. light box
+  // true = no letter/panel color was chosen — the sign company fabricates by
+  // color-matching the uploaded logo exactly, rather than a swatch/hex we picked.
+  // Only set for: lit channel letters with a background panel, or a cabinet
+  // light box. Other logo cases (unlit letters, no-panel letters, see-through
+  // light box, awnings) still carry an explicit client-chosen color as before.
+  logo_color_match?: boolean
+  // The hex value(s) Gemini reported reading off the logo during preview
+  // generation (see lib/ai/preview.ts's ColorReport) — the only concrete
+  // color data that exists when logo_color_match is true, since no swatch was
+  // ever chosen. AI-ESTIMATED from a photo, not a real swatch/Pantone lookup —
+  // present it to fabricators as needing verification, not as an authoritative
+  // spec. Only present when a preview finished and reported one back; omitted
+  // (not just false) whenever no report exists, since preview generation is
+  // best-effort and can fail or be skipped entirely.
+  logo_color_match_hex?: { letters?: string; panel?: string }
   // Channel letter material details
   panel_face_color?: { name: string; code: string; hex: string }   // Dura-Bond ACP face
   has_background?: boolean                                          // channel letters on a backer panel (true) vs mounted directly on the wall (false)

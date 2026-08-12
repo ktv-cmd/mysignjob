@@ -23,9 +23,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "GEMINI_API_KEY not set" }, { status: 500 })
 
     const originalBuffer = Buffer.from(imageDataUrl.split(",")[1]!, "base64")
-    const previewDataUrls = await generatePreviewDataUrls(originalBuffer, logoDataUrl, body)
+    const previews = await generatePreviewDataUrls(originalBuffer, logoDataUrl, body)
 
-    return NextResponse.json({ previewDataUrls, provider: "gemini-2.5-flash-image" })
+    return NextResponse.json({
+      previewDataUrls: previews.map(p => p.dataUrl),
+      previewColors: previews.map(p => p.colorReport ?? null),
+      provider: "gemini-2.5-flash-image",
+    })
   } catch (err) {
     console.error("[generate-preview]", err)
     const message = err instanceof Error ? err.message : "Preview generation failed."
