@@ -39,6 +39,16 @@ const nextConfig: NextConfig = {
       bodySizeLimit: "20mb",
     },
   },
+  // pdfjs-dist (browser-only, dynamically imported from OrderNewClient for
+  // PDF-logo extraction) still contains a Node.js canvas fallback that does
+  // `createRequire(...)("@napi-rs/canvas")`. That literal reference gets
+  // swept into the /order/new server function's file trace even though it's
+  // never reached at runtime, dragging in ~20MB+ of native canvas binaries
+  // and pushing the Netlify function past its 250MB limit. It's dead weight
+  // here — exclude it.
+  outputFileTracingExcludes: {
+    "/order/new": ["./node_modules/@napi-rs/**/*"],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "**.supabase.co" },
