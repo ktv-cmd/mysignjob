@@ -402,7 +402,12 @@ async function generateOne(params: {
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err))
       const msg = lastError.message.toLowerCase()
+      // 500/INTERNAL is Gemini's own generic "something went wrong on our end"
+      // error — Google's docs call this transient and retry-worthy, same as
+      // 503/UNAVAILABLE. Without this, a one-off internal hiccup fails the
+      // whole preview job (all variants share the same outage) with zero retry.
       const retryable = msg.includes("503") || msg.includes("unavailable") || msg.includes("high demand") || msg.includes("timeout")
+        || msg.includes("500") || msg.includes("internal")
       if (!retryable || attempt === maxRetries) break
       await new Promise(r => setTimeout(r, 2000 * Math.pow(2, attempt)))
     }

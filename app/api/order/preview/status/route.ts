@@ -29,6 +29,10 @@ export async function GET(req: NextRequest) {
     // AI-reported color(s), parallel to previewUrls — only set for
     // logoColorMatch variants; null for everything else.
     previewColors: (job.result_colors as (ColorReport | null)[] | null) ?? [],
-    error: job.error ?? null,
+    // job.error holds the raw exception text (provider API errors, storage
+    // upload failures, etc.) — kept in the DB for the admin Issues page, but
+    // never sent to the client: it can be a raw third-party API error payload,
+    // which isn't meaningful to a customer and shouldn't be exposed to them.
+    error: job.status === "error" ? "We couldn't generate your preview right now. Please try again." : null,
   })
 }
