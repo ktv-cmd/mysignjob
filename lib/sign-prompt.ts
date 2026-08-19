@@ -95,39 +95,73 @@ function blueHourSceneClause(sceneTime: SignPromptParams["sceneTime"], isIllumin
   return "TIME OF DAY: relight the entire scene as a BLUE HOUR twilight photograph (the brief dusk window professional signage photographers shoot in) — the sky is a deep dusk blue, not black, and ambient light is low but the building's architecture, texture, and color remain clearly visible; surrounding storefront/street lighting is dim. The new sign's illumination is the brightest, most dominant light source in the frame — shot with balanced exposure like a real night photograph, so the emissive surfaces show visible bloom/glow while everything else reads slightly underexposed. Do NOT render the glow as a flat colored overlay or halo shape pasted on top — it must behave like actual light: falloff, soft edges, and a faint color cast on nearby surfaces it illuminates."
 }
 
-// ─── Lighting description (channel letters) ───────────────────────────────────
+// ─── Lighting description (channel letters) ────────────────────────────────────
+// Reviewed and approved sentence-by-sentence (see the lighting-types-prompt-spec
+// spreadsheet) rather than composed from generic ON/OFF fragments — the wording
+// below is deliberately hand-tuned per technique for natural phrasing (e.g. the
+// two "off" clauses on a single-technique request read as one combined sentence,
+// not two robotic ones), so a literal per-type map is the safer way to keep the
+// shipped text matching exactly what was reviewed, instead of an abstraction
+// that could silently drift from it.
+//
+// Two properties are load-bearing and must survive any future edit:
+// 1. Every entry states BOTH what's on AND what's explicitly off for the other
+//    techniques — never just the positive description. A front-lit-only request
+//    that only says "the faces glow" (with no statement about the backdrop and
+//    side edges) is exactly what let a real generation render a full back-lit
+//    halo, complete with standoff-mount wiring, on a front-lit-only order — the
+//    model defaulted to a familiar back-lit look because nothing told it not to.
+// 2. Wording here is color-neutral ("show no light of their own", never "stay
+//    dark") and backdrop-neutral (uses the {backdrop} placeholder, never a bare
+//    "wall"). Naming a color risks contradicting colorClause()'s real hex value
+//    elsewhere in the same prompt; hardcoding "wall" is what let a back-lit halo
+//    satisfy "the wall stays dark" literally while lighting up the backer panel
+//    that actually sits behind the letters.
+//
 // "backdrop" names whatever surface actually sits immediately behind the
-// letters — the raw wall when there's no backer panel, or the panel's own
-// face when there is one (the overwhelming common case: hasBackground
-// defaults ON). This used to be hardcoded to "wall" unconditionally, which
-// left a loophole for the panel case: the model could satisfy "the wall
-// stays dark" literally (the real facade brick two feet further back DOES
-// stay dark) while still painting a bright halo onto the light-colored panel
-// immediately behind the letters — confirmed against a real front-lit
-// generation, which rendered a full back-lit-style glow ring around every
-// letter, complete with the hanging standoff-mount wiring that's specific to
-// back-lit construction, despite the prompt explicitly requesting front-lit
-// only. Naming the correct adjacent surface, and explicitly ruling out the
-// halo-ring/standoff-wire look for front/side-only lighting, closes that gap.
+// letters — the raw wall when there's no backer panel, or the panel's own face
+// when there is one (the common case: hasBackground defaults ON).
+//
+// NOTE on back_side: despite its name, this value means SIDE-LIT ONLY (front
+// off, back off, side on) — not a back+side combination. There is no true
+// back+side combo reachable from the product; the "Side" tile in the order form
+// sets lightingStyle to "back_side" and shows the side-only reference photos
+// (Side_Light_day.jpg / Side_light_night.jpg). The key is kept as "back_side"
+// here only because renaming the value throughout the type union, the
+// reference-image lookup, and the client's lightingStyle state is a separate,
+// not-yet-applied change — see AGENTS.md/session notes.
+const LIGHTING_SENTENCES: Record<string, string> = {
+  front:
+    "LIGHTING: front-lit only. The letter faces glow brightly with their own light. The {backdrop} behind " +
+    "and around the letters, and their side edges, show no glow of their own.",
+  back:
+    "LIGHTING: back-lit only. The letter faces show no light of their own. A soft glow spreads outward on " +
+    "the {backdrop} directly behind each letter, fading into the surroundings. The side edges show no " +
+    "separate light of their own.",
+  back_side: // side-lit only — see NOTE above
+    "LIGHTING: side-lit only. The letter faces show no light of their own, and the {backdrop} behind them " +
+    "shows no glow of its own. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+  both:
+    "LIGHTING: front-lit + back-lit. The letter faces glow brightly with their own light. A soft glow " +
+    "spreads outward on the {backdrop} directly behind each letter, fading into the surroundings. The side " +
+    "edges show no separate light of their own.",
+  front_back:
+    "LIGHTING: front-lit + back-lit. The letter faces glow brightly with their own light. A soft glow " +
+    "spreads outward on the {backdrop} directly behind each letter, fading into the surroundings. The side " +
+    "edges show no separate light of their own.",
+  front_side:
+    "LIGHTING: front-lit + side-lit. The letter faces glow brightly with their own light. The thin edge " +
+    "along each letter's side is lit, showing as a crisp glowing line. The {backdrop} behind and around the " +
+    "letters shows no glow of its own.",
+  full:
+    "LIGHTING: front-lit + back-lit + side-lit together. The letter faces glow brightly with their own " +
+    "light. A soft glow spreads outward on the {backdrop} directly behind each letter, fading into the " +
+    "surroundings. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+}
+
 function lightingDescription(lightingType: string | undefined, backdrop: "wall" | "panel"): string {
-  const noHaloNote = ` No halo ring, glow bleed, or hanging standoff-mount wiring around any letter — that look belongs to back-lit construction only, not used here`
-  // Mirrors noHaloNote but for the OTHER axis: "both"/"front_back" already
-  // says "do not add any side-edge accent" to stop the model volunteering a
-  // technique that wasn't asked for — the plain single-technique "front" and
-  // "back" entries need the same guard against a rim-light strip bleeding in
-  // from their own "_side" siblings, for the same reason a plain "front"
-  // request needed an explicit guard against back-lit halo bleeding in.
-  const noSideRimNote = ` No separate crisp LED rim-light strip along the side return-plane edges — that's the side-lit technique only, not used here`
-  const map: Record<string, string> = {
-    front: `front-lit illumination — the letter faces glow brightly from internal LED with visible soft bloom/halation confined to each letter's own face and side return planes; the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash, zero light spill onto the ${backdrop}.${noHaloNote}.${noSideRimNote}`,
-    back: `back-lit halo illumination — a soft, even halo of LED light washes onto the ${backdrop} directly behind each letter with visible inverse-square falloff (brightest closest to the letter, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes or glows from the front face.${noSideRimNote}`,
-    both: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
-    front_back: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
-    front_side: `front-lit illumination — the letter faces glow brightly with visible soft bloom, AND a thin, crisp, bright LED rim-light traces along each letter's side edges (the return planes); the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash or halo onto the ${backdrop}.${noHaloNote}`,
-    back_side: `back-lit halo illumination — a soft, even halo of light washes onto the ${backdrop} directly behind each letter, AND a thin, crisp, bright LED rim-light traces along each letter's side edges; the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front face`,
-    full: `full 360° illumination — all three techniques rendered together at full brightness, none dimmed to accommodate the others: bright glowing letter faces with visible bloom (front), a soft halo of light washing onto the ${backdrop} directly behind (back), and a thin crisp LED rim-light along every side edge (side)`,
-  }
-  return map[lightingType ?? "front"] ?? map.front!
+  const sentence = LIGHTING_SENTENCES[lightingType ?? "front"] ?? LIGHTING_SENTENCES.front!
+  return sentence.replace("{backdrop}", backdrop)
 }
 
 // ─── Color clause — brand mode + material color systems ───────────────────────
@@ -507,7 +541,7 @@ function buildBasePrompt(p: SignPromptParams): string {
   const backdrop: "wall" | "panel" = p.hasBackground ? "panel" : "wall"
   const lightSentence = noLight
     ? `The sign has NO artificial illumination — matte/brushed finishes, hard sun-lit contact shadows, and bold 3.5" (89mm) geometric depth for impact.`
-    : `The sign must have ${lightingDescription(p.lightingType, backdrop)}.`
+    : lightingDescription(p.lightingType, backdrop)
 
   // With a pre-painted panel, "replace the golden area / restore the wall" would
   // invite the model to wipe and rebuild the panel at its own size — the panel
