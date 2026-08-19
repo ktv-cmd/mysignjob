@@ -63,10 +63,10 @@ const STEP_LABELS: Record<Step, string> = {
 // the same granular lightingStyle state the picker uses, not the collapsed
 // ReferenceStyle.lightingType (which only distinguishes front/back/both and
 // would show "Front + back lit" for Side, Front + Side, and Full alike).
-const LIGHTING_STYLE_LABELS: Record<"front" | "back" | "back_side" | "front_back" | "front_side" | "full", string> = {
+const LIGHTING_STYLE_LABELS: Record<"front" | "back" | "side" | "front_back" | "front_side" | "full", string> = {
   front: "Front-lit",
   back: "Back-lit halo",
-  back_side: "Side (back-lit + edge accent)",
+  side: "Side-lit (edge glow only)",
   front_back: "Front + back lit",
   front_side: "Front-lit + side accent",
   full: "Full 360° (front, back + side)",
@@ -297,7 +297,7 @@ export default function OrderNewClient({ startInCaptureMode = false }: { startIn
   // New tree structure: sign type selector
   const [signCategory, setSignCategory] = useState<"letters" | "light_box" | "awning" | null>("letters")
   const [isLit, setIsLit] = useState<boolean | null>(null)
-  const [lightingStyle, setLightingStyle] = useState<"front" | "back" | "back_side" | "front_back" | "front_side" | "full">("front")
+  const [lightingStyle, setLightingStyle] = useState<"front" | "back" | "side" | "front_back" | "front_side" | "full">("front")
   const [lightBoxType, setLightBoxType] = useState<"cabinet" | "seethrough_letters">("cabinet")
   const [isPerpendicular, setIsPerpendicular] = useState(false)
   const [lightBoxShape, setLightBoxShape] = useState<string>("rectangle")
@@ -335,7 +335,7 @@ export default function OrderNewClient({ startInCaptureMode = false }: { startIn
     if (signCategory === "letters" && isLit === true) {
       if (lightingStyle === "front") return "front-lid"
       if (lightingStyle === "back") return "back-lit"
-      if (lightingStyle === "front_back" || lightingStyle === "front_side" || lightingStyle === "back_side" || lightingStyle === "full") return "back-front-lid"
+      if (lightingStyle === "front_back" || lightingStyle === "front_side" || lightingStyle === "side" || lightingStyle === "full") return "back-front-lid"
     }
     return "front-lid" // default fallback
   })()
@@ -372,7 +372,7 @@ export default function OrderNewClient({ startInCaptureMode = false }: { startIn
   // can sit on a backer panel or mount directly to the wall.
   const isChannelLetter = !isAwning && computedReferenceId !== "light-box"
   // For lit channel letters, use the client's actual granular lightingStyle
-  // pick (front/back/front_back/front_side/back_side/full) — ReferenceStyle's
+  // pick (front/back/front_back/front_side/side/full) — ReferenceStyle's
   // own lightingType only distinguishes front/back/both and would collapse
   // side-accent and full-surround into the same "both" prompt as plain
   // front+back lighting. Other categories (light-box, awning, no-light) don't
@@ -1663,7 +1663,7 @@ export default function OrderNewClient({ startInCaptureMode = false }: { startIn
                           <>
                             <PictureChoice key="bg-back" imageSrc="/examples/letters-lighting-bg/Back_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/back_light_night.jpg" defaultNight label="Back" description="Panel glow" selected={lightingStyle === "back"} onClick={() => setLightingStyle("back")} />
                             <PictureChoice key="bg-front" imageSrc="/examples/letters-lighting-bg/Front_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_light_night.jpg" defaultNight label="Front" description="Lit face only" selected={lightingStyle === "front"} onClick={() => setLightingStyle("front")} />
-                            <PictureChoice key="bg-side" imageSrc="/examples/letters-lighting-bg/Side_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/Side_light_night.jpg" defaultNight label="Side" description="Edge glow" selected={lightingStyle === "back_side"} onClick={() => setLightingStyle("back_side")} />
+                            <PictureChoice key="bg-side" imageSrc="/examples/letters-lighting-bg/Side_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/Side_light_night.jpg" defaultNight label="Side" description="Edge glow" selected={lightingStyle === "side"} onClick={() => setLightingStyle("side")} />
                             <PictureChoice key="bg-front_back" imageSrc="/examples/letters-lighting-bg/Back_Front_Light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_back_night.jpg" defaultNight label="Front + Back" description="Both directions" selected={lightingStyle === "front_back"} onClick={() => setLightingStyle("front_back")} />
                             <PictureChoice key="bg-full" imageSrc="/examples/letters-lighting-bg/Full_light_day.jpg" nightImageSrc="/examples/letters-lighting-bg/Full_light_night.jpg" defaultNight label="Full light" description="All-around" selected={lightingStyle === "full"} onClick={() => setLightingStyle("full")} />
                             <PictureChoice key="bg-front_side" imageSrc="/examples/letters-lighting-bg/Front_Side_ligth_day.jpg" nightImageSrc="/examples/letters-lighting-bg/front_side_night.jpg" defaultNight label="Front + Side" description="Face & side glow" selected={lightingStyle === "front_side"} onClick={() => setLightingStyle("front_side")} />

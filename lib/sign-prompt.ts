@@ -49,8 +49,11 @@ export interface SignPromptParams {
   // ── reference style (primary signage selector, from webs/signs) ──
   referenceId: string                   // front-lid | back-front-lid | back-lit | light-box | no-light-outdoor | awning
   // "both" is a legacy alias for "front_back", kept so previously-queued preview_jobs
-  // rows (stored with the old 3-value shape) still degrade gracefully.
-  lightingType?: "front" | "back" | "both" | "front_back" | "front_side" | "back_side" | "full"
+  // rows (stored with the old 3-value shape) still degrade gracefully. Likewise
+  // "back_side" is a legacy alias for "side" (it never meant "back-lit + side",
+  // despite the name — see LIGHTING_SENTENCES) — the client now sends "side",
+  // "back_side" stays recognized only for orders already queued under the old name.
+  lightingType?: "front" | "back" | "both" | "front_back" | "front_side" | "back_side" | "side" | "full"
   illuminated?: boolean                 // explicitly track whether lighting is on (for consistent material descriptions)
   // ── typography (name-only / logo+name) ──
   fontStyle?: FontStyle
@@ -122,14 +125,13 @@ function blueHourSceneClause(sceneTime: SignPromptParams["sceneTime"], isIllumin
 // letters — the raw wall when there's no backer panel, or the panel's own face
 // when there is one (the common case: hasBackground defaults ON).
 //
-// NOTE on back_side: despite its name, this value means SIDE-LIT ONLY (front
-// off, back off, side on) — not a back+side combination. There is no true
-// back+side combo reachable from the product; the "Side" tile in the order form
-// sets lightingStyle to "back_side" and shows the side-only reference photos
-// (Side_Light_day.jpg / Side_light_night.jpg). The key is kept as "back_side"
-// here only because renaming the value throughout the type union, the
-// reference-image lookup, and the client's lightingStyle state is a separate,
-// not-yet-applied change — see AGENTS.md/session notes.
+// NOTE on "side" / "back_side": despite the legacy name, this technique means
+// SIDE-LIT ONLY (front off, back off, side on) — not a back+side combination.
+// There is no true back+side combo reachable from the product. The order
+// form's "Side" tile now sends "side"; "back_side" is kept recognized here
+// only so preview_jobs rows already queued under the old name (and legacy
+// sign_spec.lighting_style values from types/index.ts) still degrade
+// gracefully — same pattern as "both" being a legacy alias for "front_back".
 const LIGHTING_SENTENCES: Record<string, string> = {
   front:
     "LIGHTING: front-lit only. The letter faces glow brightly with their own light. The {backdrop} behind " +
@@ -138,7 +140,10 @@ const LIGHTING_SENTENCES: Record<string, string> = {
     "LIGHTING: back-lit only. The letter faces show no light of their own. A soft glow spreads outward on " +
     "the {backdrop} directly behind each letter, fading into the surroundings. The side edges show no " +
     "separate light of their own.",
-  back_side: // side-lit only — see NOTE above
+  side:
+    "LIGHTING: side-lit only. The letter faces show no light of their own, and the {backdrop} behind them " +
+    "shows no glow of its own. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+  back_side: // legacy alias for "side" — see NOTE above
     "LIGHTING: side-lit only. The letter faces show no light of their own, and the {backdrop} behind them " +
     "shows no glow of its own. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
   both:
@@ -155,8 +160,10 @@ const LIGHTING_SENTENCES: Record<string, string> = {
     "letters shows no glow of its own.",
   full:
     "LIGHTING: front-lit + back-lit + side-lit together. The letter faces glow brightly with their own " +
-    "light. A soft glow spreads outward on the {backdrop} directly behind each letter, fading into the " +
-    "surroundings. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+    "light, and the side return planes glow with that SAME brightness — the entire return-plane surface " +
+    "is lit, not a thin edge line, so the glowing face and glowing side read as one continuous lit volume " +
+    "from an angled view. A soft glow spreads outward on the {backdrop} directly behind each letter, " +
+    "fading into the surroundings.",
 }
 
 function lightingDescription(lightingType: string | undefined, backdrop: "wall" | "panel"): string {

@@ -48,7 +48,7 @@ If the user prompt states the backer panel is ALREADY PAINTED into Image 1 (a so
 
 ## LIGHTING & EMISSION:
 IF 'NO LIGHT': PROHIBITED — glow, bloom, halo, neon, luminescence, LED, backlight. REQUIRED — matte surfaces, hard contact shadows (Ambient Occlusion), sun-lit/daylight only, opaque solid materials, zero emission, external environmental lighting only.
-IF ILLUMINATED: the per-request description below names one or more lighting techniques — treat that combination as the complete and exact emission spec for this render, nothing more and nothing less. Render illumination the way a camera actually captures a lit sign at night: bright emissive surfaces with visible soft bloom/halation at their edges, strong contrast against whatever stays dark. Front-lit: subsurface scattering through the acrylic faces makes them glow brightly with visible bloom; the wall directly behind the sign stays completely dark — zero glow, zero wash. Back-lit: a soft halo of light washes onto the wall BEHIND the sign with visible inverse-square falloff (brightest near the sign, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front. Side-mounted accent: a thin, crisp, bright LED rim-light traced along each letter's side return-plane edges only — it never by itself adds front-face glow or a wall wash; combine it with front-lit and/or back-lit glow only when the per-request description names both together. Full/complete surround: front-lit face glow + back-lit wall wash + side-mounted edge accents, ALL THREE rendered at full brightness simultaneously — do not dim any one technique to accommodate the others.
+IF ILLUMINATED: the per-request description below names one or more lighting techniques — treat that combination as the complete and exact emission spec for this render, nothing more and nothing less. Render illumination the way a camera actually captures a lit sign at night: bright emissive surfaces with visible soft bloom/halation at their edges, strong contrast against whatever stays dark. Note: many signs mount on a backer panel rather than bare wall — wherever this section says "the surface behind the sign," that means the panel's face when one is present, or the wall itself when there is none; never treat a distant, still-dark wall as satisfying a requirement about the panel directly behind the letters. Front-lit: subsurface scattering through the acrylic faces makes them glow brightly with visible bloom; the surface directly behind the sign stays completely dark — zero glow, zero wash. Back-lit: a soft halo of light washes onto the surface directly behind the sign with visible inverse-square falloff (brightest near the sign, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front. Side-mounted accent: a thin, crisp, bright LED rim-light traced along each letter's side return-plane edges only — it never by itself adds front-face glow or a wash on the surface behind the sign; combine it with front-lit and/or back-lit glow only when the per-request description names both together. Full/complete surround: front-lit face glow + back-lit wash on the surface behind the sign + FULLY GLOWING side return planes — the entire return-plane surface emits light at the SAME brightness as the front face (not a thin edge accent), so the lit face and lit side read as one continuous glowing volume from an angled view. ALL THREE techniques rendered at full brightness simultaneously — do not dim any one technique to accommodate the others.
 
 TIME OF DAY: by default, match Image 1's existing ambient lighting exactly (do not add glow effects a daytime photo wouldn't show). ONLY if the per-request instructions include a "TIME OF DAY" line requesting a dusk/night scene, relight the entire environment accordingly — darker sky, dimmer ambient/surrounding light — while keeping the new sign's illumination as the dominant, clearly visible light source.
 
@@ -116,7 +116,10 @@ function sanitizeLogoMime(value: string | undefined | null): string {
 export interface PreviewJobParams {
   quad: { x: number; y: number }[]
   referenceId: string
-  lightingType?: "front" | "back" | "both" | "front_back" | "front_side" | "back_side" | "full"
+  // "both" is a legacy alias for "front_back", and "back_side" a legacy alias
+  // for "side" (it never meant "back-lit + side" despite the name) — both kept
+  // only so already-queued preview_jobs rows still degrade gracefully.
+  lightingType?: "front" | "back" | "both" | "front_back" | "front_side" | "back_side" | "side" | "full"
   illuminated?: boolean
   seeThroughLetters?: boolean           // light-box variant: halo-lit letters cut from an opaque panel
   businessName: string
@@ -209,7 +212,8 @@ const LIGHTING_REFERENCE_FILES: Record<string, { day: string; night: string }> =
   both: { day: "Back_Front_Light_day.jpg", night: "front_back_night.jpg" },
   front_back: { day: "Back_Front_Light_day.jpg", night: "front_back_night.jpg" },
   front_side: { day: "Front_Side_ligth_day.jpg", night: "front_side_night.jpg" },
-  back_side: { day: "Side_Light_day.jpg", night: "Side_light_night.jpg" },
+  side: { day: "Side_Light_day.jpg", night: "Side_light_night.jpg" },
+  back_side: { day: "Side_Light_day.jpg", night: "Side_light_night.jpg" }, // legacy alias for "side"
   full: { day: "Full_light_day.jpg", night: "Full_light_night.jpg" },
 }
 const AWNING_FRAME_REFERENCE_DIR = "/examples/awning-frames"

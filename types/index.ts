@@ -106,7 +106,9 @@ export interface SignSpec {
   sign_category?: "letters" | "light_box" | "awning"
   // Letters-specific
   is_lit?: boolean | null       // null = unset (must choose), true = with light, false = no light
-  lighting_style?: "front" | "back" | "back_side" | "front_back" | "front_side" | "full"  // only when is_lit = true
+  // "back_side" is a legacy alias for "side" (it never meant "back-lit + side"
+  // despite the name) — kept only so already-stored order rows still parse.
+  lighting_style?: "front" | "back" | "back_side" | "side" | "front_back" | "front_side" | "full"  // only when is_lit = true
   // Light box-specific
   light_box_type?: "cabinet" | "seethrough_letters"
   light_box_shape?: string      // e.g. "rectangle", "circle", "oval", "rounded"

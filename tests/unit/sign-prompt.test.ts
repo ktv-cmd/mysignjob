@@ -11,18 +11,29 @@ const baseParams: SignPromptParams = {
 }
 
 describe("buildSignPrompt — lighting style plumbing (6-value fix)", () => {
-  const STYLES = ["front", "back", "both", "front_back", "front_side", "back_side", "full"] as const
+  const STYLES = ["front", "back", "both", "front_back", "front_side", "back_side", "side", "full"] as const
 
-  it("produces a distinct lighting sentence for each style, except the both/front_back legacy alias pair", () => {
+  it("produces a distinct lighting sentence for each style, except the two legacy alias pairs", () => {
     const prompts = STYLES.map((lightingType) => buildSignPrompt({ ...baseParams, lightingType }))
     const unique = new Set(prompts)
-    // "both" is a legacy alias for "front_back" (kept for old queued preview_jobs
-    // rows) — everything else must produce a genuinely different prompt.
-    expect(unique.size).toBe(STYLES.length - 1)
+    // "both" is a legacy alias for "front_back", and "back_side" a legacy alias
+    // for "side" (kept for old queued preview_jobs rows) — everything else must
+    // produce a genuinely different prompt.
+    expect(unique.size).toBe(STYLES.length - 2)
   })
 
-  it("only mentions the side-lit edge accent for front_side / back_side / full", () => {
-    for (const style of ["front_side", "back_side", "full"] as const) {
+  it("back_side and side produce byte-identical output (side-lit only, no back-lit halo)", () => {
+    const sideOut = buildSignPrompt({ ...baseParams, lightingType: "side" })
+    const backSideOut = buildSignPrompt({ ...baseParams, lightingType: "back_side" })
+    expect(sideOut).toBe(backSideOut)
+    // Despite the legacy name, "back_side" must NOT combine back-lit + side-lit —
+    // it means side-lit only. See lib/sign-prompt.ts's LIGHTING_SENTENCES note.
+    expect(sideOut).toContain("side-lit only")
+    expect(sideOut).not.toContain("back-lit")
+  })
+
+  it("only mentions the side-lit edge accent for front_side / back_side / side / full", () => {
+    for (const style of ["front_side", "back_side", "side", "full"] as const) {
       expect(buildSignPrompt({ ...baseParams, lightingType: style })).toContain("side-lit")
     }
     for (const style of ["front", "back", "front_back", "both"] as const) {
