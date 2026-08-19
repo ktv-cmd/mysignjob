@@ -111,9 +111,16 @@ function blueHourSceneClause(sceneTime: SignPromptParams["sceneTime"], isIllumin
 // halo-ring/standoff-wire look for front/side-only lighting, closes that gap.
 function lightingDescription(lightingType: string | undefined, backdrop: "wall" | "panel"): string {
   const noHaloNote = ` No halo ring, glow bleed, or hanging standoff-mount wiring around any letter — that look belongs to back-lit construction only, not used here`
+  // Mirrors noHaloNote but for the OTHER axis: "both"/"front_back" already
+  // says "do not add any side-edge accent" to stop the model volunteering a
+  // technique that wasn't asked for — the plain single-technique "front" and
+  // "back" entries need the same guard against a rim-light strip bleeding in
+  // from their own "_side" siblings, for the same reason a plain "front"
+  // request needed an explicit guard against back-lit halo bleeding in.
+  const noSideRimNote = ` No separate crisp LED rim-light strip along the side return-plane edges — that's the side-lit technique only, not used here`
   const map: Record<string, string> = {
-    front: `front-lit illumination — the letter faces glow brightly from internal LED with visible soft bloom/halation confined to each letter's own face and side return planes; the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash, zero light spill onto the ${backdrop}.${noHaloNote}`,
-    back: `back-lit halo illumination — a soft, even halo of LED light washes onto the ${backdrop} directly behind each letter with visible inverse-square falloff (brightest closest to the letter, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes or glows from the front face`,
+    front: `front-lit illumination — the letter faces glow brightly from internal LED with visible soft bloom/halation confined to each letter's own face and side return planes; the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash, zero light spill onto the ${backdrop}.${noHaloNote}.${noSideRimNote}`,
+    back: `back-lit halo illumination — a soft, even halo of LED light washes onto the ${backdrop} directly behind each letter with visible inverse-square falloff (brightest closest to the letter, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes or glows from the front face.${noSideRimNote}`,
     both: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
     front_back: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
     front_side: `front-lit illumination — the letter faces glow brightly with visible soft bloom, AND a thin, crisp, bright LED rim-light traces along each letter's side edges (the return planes); the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash or halo onto the ${backdrop}.${noHaloNote}`,
