@@ -135,17 +135,21 @@ function blueHourSceneClause(sceneTime: SignPromptParams["sceneTime"], isIllumin
 const LIGHTING_SENTENCES: Record<string, string> = {
   front:
     "LIGHTING: front-lit only. The letter faces glow brightly with their own light. The {backdrop} behind " +
-    "and around the letters, and their side edges, show no glow of their own.",
+    "and around the letters, and their side edges, show no glow of their own — no halo, aura, or color " +
+    "wash bleeds onto the {backdrop}, not even a soft one right at the letters' edges; any bloom stays " +
+    "confined to the glowing face itself.",
   back:
     "LIGHTING: back-lit only. The letter faces show no light of their own. A soft glow spreads outward on " +
     "the {backdrop} directly behind each letter, fading into the surroundings. The side edges show no " +
     "separate light of their own.",
   side:
     "LIGHTING: side-lit only. The letter faces show no light of their own, and the {backdrop} behind them " +
-    "shows no glow of its own. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+    "shows no glow of its own — no halo or aura bleeds onto it near the letters. The thin edge along each " +
+    "letter's side is lit, showing as a crisp glowing line, with the glow confined tightly to that edge.",
   back_side: // legacy alias for "side" — see NOTE above
     "LIGHTING: side-lit only. The letter faces show no light of their own, and the {backdrop} behind them " +
-    "shows no glow of its own. The thin edge along each letter's side is lit, showing as a crisp glowing line.",
+    "shows no glow of its own — no halo or aura bleeds onto it near the letters. The thin edge along each " +
+    "letter's side is lit, showing as a crisp glowing line, with the glow confined tightly to that edge.",
   both:
     "LIGHTING: front-lit + back-lit. The letter faces glow brightly with their own light. A soft glow " +
     "spreads outward on the {backdrop} directly behind each letter, fading into the surroundings. The side " +
@@ -157,7 +161,7 @@ const LIGHTING_SENTENCES: Record<string, string> = {
   front_side:
     "LIGHTING: front-lit + side-lit. The letter faces glow brightly with their own light. The thin edge " +
     "along each letter's side is lit, showing as a crisp glowing line. The {backdrop} behind and around the " +
-    "letters shows no glow of its own.",
+    "letters shows no glow of its own — no halo or aura bleeds onto it, not even right at the letters' edges.",
   full:
     "LIGHTING: front-lit + back-lit + side-lit together. The letter faces glow brightly with their own " +
     "light, and the side return planes glow with that SAME brightness — the entire return-plane surface " +
