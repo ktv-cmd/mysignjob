@@ -96,15 +96,29 @@ function blueHourSceneClause(sceneTime: SignPromptParams["sceneTime"], isIllumin
 }
 
 // ─── Lighting description (channel letters) ───────────────────────────────────
-function lightingDescription(lightingType?: string): string {
+// "backdrop" names whatever surface actually sits immediately behind the
+// letters — the raw wall when there's no backer panel, or the panel's own
+// face when there is one (the overwhelming common case: hasBackground
+// defaults ON). This used to be hardcoded to "wall" unconditionally, which
+// left a loophole for the panel case: the model could satisfy "the wall
+// stays dark" literally (the real facade brick two feet further back DOES
+// stay dark) while still painting a bright halo onto the light-colored panel
+// immediately behind the letters — confirmed against a real front-lit
+// generation, which rendered a full back-lit-style glow ring around every
+// letter, complete with the hanging standoff-mount wiring that's specific to
+// back-lit construction, despite the prompt explicitly requesting front-lit
+// only. Naming the correct adjacent surface, and explicitly ruling out the
+// halo-ring/standoff-wire look for front/side-only lighting, closes that gap.
+function lightingDescription(lightingType: string | undefined, backdrop: "wall" | "panel"): string {
+  const noHaloNote = ` No halo ring, glow bleed, or hanging standoff-mount wiring around any letter — that look belongs to back-lit construction only, not used here`
   const map: Record<string, string> = {
-    front: "front-lit illumination — the letter faces glow brightly from internal LED with visible soft bloom/halation at the edges, like a real illuminated sign photographed at night; the wall directly behind the letters stays completely dark and unlit — zero wash, zero halo, no light spill onto the wall",
-    back: "back-lit halo illumination — a soft, even halo of LED light washes onto the wall directly behind each letter with visible inverse-square falloff (brightest closest to the letter, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes or glows from the front face",
-    both: "combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the wall directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent",
-    front_back: "combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the wall directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent",
-    front_side: "front-lit illumination — the letter faces glow brightly with visible soft bloom, AND a thin, crisp, bright LED rim-light traces along each letter's side edges (the return planes); the wall directly behind the letters stays completely dark and unlit — zero wash or halo behind the letters",
-    back_side: "back-lit halo illumination — a soft, even halo of light washes onto the wall directly behind each letter, AND a thin, crisp, bright LED rim-light traces along each letter's side edges; the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front face",
-    full: "full 360° illumination — all three techniques rendered together at full brightness, none dimmed to accommodate the others: bright glowing letter faces with visible bloom (front), a soft halo of light washing onto the wall directly behind (back), and a thin crisp LED rim-light along every side edge (side)",
+    front: `front-lit illumination — the letter faces glow brightly from internal LED with visible soft bloom/halation confined to each letter's own face and side return planes; the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash, zero light spill onto the ${backdrop}.${noHaloNote}`,
+    back: `back-lit halo illumination — a soft, even halo of LED light washes onto the ${backdrop} directly behind each letter with visible inverse-square falloff (brightest closest to the letter, fading outward); the letter faces themselves stay fully opaque, matte, and dark — no light escapes or glows from the front face`,
+    both: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
+    front_back: `combined front-lit AND back-lit illumination, both rendered at full strength simultaneously — the letter faces glow brightly with visible bloom AND a soft halo of light washes onto the ${backdrop} directly behind each letter; do not dim either effect to balance the other, and do not add any side-edge accent`,
+    front_side: `front-lit illumination — the letter faces glow brightly with visible soft bloom, AND a thin, crisp, bright LED rim-light traces along each letter's side edges (the return planes); the ${backdrop} immediately behind and around the letters stays completely dark and unlit — zero wash or halo onto the ${backdrop}.${noHaloNote}`,
+    back_side: `back-lit halo illumination — a soft, even halo of light washes onto the ${backdrop} directly behind each letter, AND a thin, crisp, bright LED rim-light traces along each letter's side edges; the letter faces themselves stay fully opaque, matte, and dark — no light escapes the front face`,
+    full: `full 360° illumination — all three techniques rendered together at full brightness, none dimmed to accommodate the others: bright glowing letter faces with visible bloom (front), a soft halo of light washing onto the ${backdrop} directly behind (back), and a thin crisp LED rim-light along every side edge (side)`,
   }
   return map[lightingType ?? "front"] ?? map.front!
 }
@@ -171,6 +185,38 @@ function colorClause(p: SignPromptParams): string {
     return `The letters should be ${p.letterColor}.`
   }
   return "The letters should complement the building's color palette — brushed aluminum, matte black, or bronze."
+}
+
+// ─── Light-box color clause (cabinet face — always translucent acrylic) ───────
+// colorClause() above ties the chosen swatch to a literal build material
+// ("use aluminum" XOR "use acrylic, do NOT use aluminum") because for channel
+// letters that choice really is the letter body's material. A light box's face
+// is ALWAYS translucent acrylic per CASE A1 in the system instruction — the
+// client's swatch pick (whether it came from the Dura-Bond or Dura-Cast color
+// list) only selects the face's TINT, never the material, so reusing
+// colorClause() here produced a self-contradicting prompt: "translucent
+// acrylic face panel" in one sentence, then "Do NOT use acrylic on any
+// element" two sentences later whenever the client picked an aluminum-family
+// swatch. This clause never emits a material prohibition the cabinet can't
+// honor, and never calls the face "letters" (there are none — it's one
+// unified cabinet face, whether the content is a logo, a name, or both).
+function lightBoxColorClause(p: SignPromptParams): string {
+  if (p.hasLogo && p.logoColorMatch) {
+    return `Face color: analyze the logo in Image 2 and reproduce its exact real colors on the translucent acrylic face — do NOT invent a different or generic color.`
+  }
+  const swatch = p.acrylic ?? p.panelFace
+  if (p.hasLogo) {
+    return swatch
+      ? `LOGO: retain its exact original colors from Image 2. The cabinet's translucent acrylic face is tinted ${swatch.name} (${swatch.hex}).`
+      : `LOGO: retain its exact original colors from Image 2.`
+  }
+  if (swatch) {
+    return `The cabinet's translucent acrylic face is tinted ${swatch.name} (approx ${swatch.hex}).`
+  }
+  if (p.letterColor) {
+    return `The cabinet's translucent acrylic face is tinted ${p.letterColor}.`
+  }
+  return "The cabinet face color should complement the building's color palette."
 }
 
 // ─── Backer-panel clause (channel-letter styles only) ─────────────────────────
@@ -386,7 +432,7 @@ function buildBasePrompt(p: SignPromptParams): string {
       `Generate a photorealistic architectural photo of the storefront.`,
       `Inside the golden highlighted area, place a new high-end illuminated light box cabinet sign that clearly displays ${contentDesc}.`,
       `The sign is a sleek aluminum cabinet with a translucent acrylic face panel and visible depth (3.5" / 89mm), crisp edges, and internal LED illumination creating an even, soft glow.`,
-      colorClause(p),
+      lightBoxColorClause(p),
       blueHourSceneClause(p.sceneTime, true),
       `The cabinet must be physically mounted to the wall with visible brackets — do not let it float, and cast realistic contact shadows.`,
       `Completely replace the golden highlighted area with this new signage, restoring the wall texture around it.`,
@@ -446,9 +492,15 @@ function buildBasePrompt(p: SignPromptParams): string {
   const fontDirective = (p.brandMode !== "logo-only" && p.fontStyle)
     ? ` Typography: ${getFontDescription(p.fontStyle)}`
     : ""
+  // hasBackground (not hasPaintedPanel) is the right signal here: it's true
+  // whenever letters sit on ANY backer panel, whether pre-painted into Image 1
+  // or freshly constructed per backgroundClause's logoColorMatch branch — in
+  // both cases the panel, not the far wall, is what actually sits immediately
+  // behind the letters.
+  const backdrop: "wall" | "panel" = p.hasBackground ? "panel" : "wall"
   const lightSentence = noLight
     ? `The sign has NO artificial illumination — matte/brushed finishes, hard sun-lit contact shadows, and bold 3.5" (89mm) geometric depth for impact.`
-    : `The sign must have ${lightingDescription(p.lightingType)}.`
+    : `The sign must have ${lightingDescription(p.lightingType, backdrop)}.`
 
   // With a pre-painted panel, "replace the golden area / restore the wall" would
   // invite the model to wipe and rebuild the panel at its own size — the panel
