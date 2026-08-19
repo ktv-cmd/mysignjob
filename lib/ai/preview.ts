@@ -289,8 +289,14 @@ async function generateOne(params: {
   // number styleReferenceSlotDesc() names in the prompt text.
   styleRefBase64?: string | null
   styleRefMime?: string
+  // "night" variants ask Gemini to relight the ENTIRE scene to blue hour
+  // (blueHourSceneClause) — mask-blending back onto the original photo would
+  // silently discard that relighting everywhere except inside the sign zone,
+  // pasting the original daytime background back in. Only "day" variants use
+  // the mask blend, to protect the rest of the storefront from AI drift.
+  sceneTime: "day" | "night"
 }): Promise<{ dataUrl: string; colorReport?: ColorReport }> {
-  const { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H, styleRefBase64, styleRefMime } = params
+  const { annotatedBuffer, logoBase64, logoMime, prompt, apiKey, sharp, originalBuffer, maskBuffer, W, H, styleRefBase64, styleRefMime, sceneTime } = params
 
   const { GoogleGenAI, HarmCategory, HarmBlockThreshold } = await import("@google/genai")
   const ai = new GoogleGenAI({ apiKey })
@@ -344,33 +350,43 @@ async function generateOne(params: {
       // Composite generated region back over the original using the mask.
       const genBuffer = Buffer.from(generatedBase64, "base64")
       await debugDump("raw-gen", genBuffer)
-      const origRgb = await sharp(originalBuffer).resize(W, H).removeAlpha().raw().toBuffer()
       // "cover" (crop-to-fill, centered) instead of "fill" (non-uniform stretch).
       // Even the nearest supported aspect-ratio bucket rarely matches the photo
       // exactly, so a small centered crop is unavoidable — but a crop preserves
       // proportions, whereas a stretch warps every shape and misaligns edges.
       const genRgb = await sharp(genBuffer).resize(W, H, { fit: "cover", position: "centre" }).removeAlpha().raw().toBuffer()
-      // Erode the zone edge a few px (blur + high threshold) so any leftover
-      // gold guide outline the model kept at the mask boundary never survives
-      // into the composite — the rim pixels come from the original photo. A
-      // final 1px blur feathers the seam.
-      const blendMask = await sharp(maskBuffer)
-        .resize(W, H, { fit: "fill" })
-        .greyscale()
-        .blur(2)
-        .threshold(250)
-        .blur(1)
-        .raw()
-        .toBuffer()
 
-      const n = W * H
-      const out = Buffer.alloc(n * 3)
-      for (let i = 0; i < n; i++) {
-        const m = (blendMask[i] ?? 0) / 255
-        const o = i * 3
-        out[o]     = Math.round((origRgb[o] ?? 0) * (1 - m) + (genRgb[o] ?? 0) * m)
-        out[o + 1] = Math.round((origRgb[o + 1] ?? 0) * (1 - m) + (genRgb[o + 1] ?? 0) * m)
-        out[o + 2] = Math.round((origRgb[o + 2] ?? 0) * (1 - m) + (genRgb[o + 2] ?? 0) * m)
+      let out: Buffer
+      if (sceneTime === "night") {
+        // Blue-hour variants relight the WHOLE frame (blueHourSceneClause) —
+        // masking back onto the original would paste the original daytime
+        // background back everywhere outside the sign zone. Use the full
+        // generated frame as-is.
+        out = Buffer.from(genRgb)
+      } else {
+        const origRgb = await sharp(originalBuffer).resize(W, H).removeAlpha().raw().toBuffer()
+        // Erode the zone edge a few px (blur + high threshold) so any leftover
+        // gold guide outline the model kept at the mask boundary never survives
+        // into the composite — the rim pixels come from the original photo. A
+        // final 1px blur feathers the seam.
+        const blendMask = await sharp(maskBuffer)
+          .resize(W, H, { fit: "fill" })
+          .greyscale()
+          .blur(2)
+          .threshold(250)
+          .blur(1)
+          .raw()
+          .toBuffer()
+
+        const n = W * H
+        out = Buffer.alloc(n * 3)
+        for (let i = 0; i < n; i++) {
+          const m = (blendMask[i] ?? 0) / 255
+          const o = i * 3
+          out[o]     = Math.round((origRgb[o] ?? 0) * (1 - m) + (genRgb[o] ?? 0) * m)
+          out[o + 1] = Math.round((origRgb[o + 1] ?? 0) * (1 - m) + (genRgb[o + 1] ?? 0) * m)
+          out[o + 2] = Math.round((origRgb[o + 2] ?? 0) * (1 - m) + (genRgb[o + 2] ?? 0) * m)
+        }
       }
 
       const compositedJpeg = await sharp(out, { raw: { width: W, height: H, channels: 3 } })
@@ -542,7 +558,7 @@ export async function generatePreviewDataUrls(
   const variants = await Promise.all(sceneTimes.map(async (sceneTime) => {
     const styleRef = await resolveStyleReference(params, sceneTime)
     const prompt = buildSignPrompt({ ...sharedPromptParams, sceneTime, styleReferenceKind: styleRef?.kind })
-    return { prompt, styleRefBase64: styleRef?.base64 ?? null, styleRefMime: styleRef?.mime }
+    return { prompt, styleRefBase64: styleRef?.base64 ?? null, styleRefMime: styleRef?.mime, sceneTime }
   }))
   const shared = { annotatedBuffer, logoBase64, logoMime, apiKey, sharp, originalBuffer, maskBuffer, W, H }
 

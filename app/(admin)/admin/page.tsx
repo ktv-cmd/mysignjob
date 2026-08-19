@@ -1,276 +1,61 @@
 import { createClient } from "@/lib/supabase/server"
-import { approveSCInsuranceReviewAction, selectWinningBidAction } from "@/app/actions/admin"
+import Link from "next/link"
 import { formatCents } from "@/lib/utils"
 
-const ROW_LIMIT = 200
+const OPEN_ORDER_STATUSES_EXCLUDED = ["completed", "cancelled"]
+const OPEN_DISPUTE_STATUSES = ["open", "under_review"]
+const GMV_ROW_LIMIT = 1000
 
-interface BidRow {
-  id: string
-  order_id: string
-  price_cents: number
-  timeline_days: number
-  notes: string | null
-  status: string
-  created_at: string
-  orders: { id: string; status: string; sign_spec: { business_name?: string; sign_type?: string } } | null
-  sc_companies: { name: string } | null
-}
-
-interface SCRow {
-  id: string
-  name: string
-  status: string
-  city: string | null
-  state: string | null
-  commission_rate: number
-  agreement_signed_at: string | null
-  insurance_verified: boolean
-  insurance_reviewed_at: string | null
-  stripe_onboarding_complete: boolean
-  created_at: string
-}
-
-interface PaymentRow {
-  id: string
-  order_id: string
-  amount_cents: number
-  stage: string
-  status: string
-  created_at: string
-  orders: { sign_spec: { business_name?: string } } | null
-}
-
-interface TransferRow {
-  id: string
-  order_id: string
-  amount_cents: number
-  milestone: string
-  created_at: string
-  sc_companies: { name: string } | null
-  orders: { sign_spec: { business_name?: string } } | null
-}
-
-export default async function AdminDashboard() {
+export default async function AdminOverviewPage() {
   const supabase = await createClient()
+  const sevenDaysAgo = new Date(new Date().getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()
 
-  const [{ data: bids, error: bidsError }, { data: scCompanies }, { data: payments }, { data: transfers }] = await Promise.all([
-    supabase
-      .from("bids")
-      // Explicit FK name required: orders<->bids has two relationships
-      // (bids.order_id -> orders.id, and orders.selected_bid_id -> bids.id),
-      // so PostgREST can't infer which one "orders(...)" should mean.
-      .select("*, orders!bids_order_id_fkey(id, status, sign_spec), sc_companies(name)")
-      .order("created_at", { ascending: false })
-      .limit(ROW_LIMIT),
-    supabase
-      .from("sc_companies")
-      .select("*")
-      .order("created_at", { ascending: false })
-      .limit(ROW_LIMIT),
-    supabase
-      .from("payments")
-      .select("*, orders(sign_spec)")
-      .order("created_at", { ascending: false })
-      .limit(ROW_LIMIT),
-    supabase
-      .from("transfers")
-      .select("*, sc_companies(name), orders(sign_spec)")
-      .order("created_at", { ascending: false })
-      .limit(ROW_LIMIT),
+  const [
+    { count: openOrders },
+    { count: activeCompanies },
+    { count: pendingReviews },
+    { count: openDisputes },
+    { count: failedPreviews },
+    { data: succeededPayments },
+  ] = await Promise.all([
+    supabase.from("orders").select("id", { count: "exact", head: true }).not("status", "in", `(${OPEN_ORDER_STATUSES_EXCLUDED.join(",")})`),
+    supabase.from("sc_companies").select("id", { count: "exact", head: true }).eq("status", "active"),
+    supabase.from("sc_companies").select("id", { count: "exact", head: true }).eq("insurance_verified", true).is("insurance_reviewed_at", null),
+    supabase.from("disputes").select("id", { count: "exact", head: true }).in("status", OPEN_DISPUTE_STATUSES),
+    supabase.from("preview_jobs").select("id", { count: "exact", head: true }).eq("status", "error").gte("created_at", sevenDaysAgo),
+    supabase.from("payments").select("amount_cents").eq("status", "succeeded").limit(GMV_ROW_LIMIT),
   ])
 
-  if (bidsError) console.error("[admin] failed to load bids", bidsError)
-  const bidRows = (bids ?? []) as unknown as BidRow[]
-  const scRows = (scCompanies ?? []) as unknown as SCRow[]
-  const paymentRows = (payments ?? []) as unknown as PaymentRow[]
-  const transferRows = (transfers ?? []) as unknown as TransferRow[]
+  const gmvCents = (succeededPayments ?? []).reduce((sum, p) => sum + p.amount_cents, 0)
+
+  const tiles = [
+    { label: "Open orders", value: openOrders ?? 0, href: "/admin/orders" },
+    { label: "Active sign companies", value: activeCompanies ?? 0, href: "/admin/companies" },
+    { label: "SC reviews pending", value: pendingReviews ?? 0, href: "/admin/companies" },
+    { label: "Open disputes", value: openDisputes ?? 0, href: "/admin/issues" },
+    { label: "Failed previews (7d)", value: failedPreviews ?? 0, href: "/admin/issues" },
+    { label: "Payment volume", value: formatCents(gmvCents), href: "/admin/transactions" },
+  ]
 
   return (
-    <div className="max-w-6xl mx-auto space-y-10">
+    <div className="max-w-6xl mx-auto space-y-8">
       <div>
-        <h1 className="text-2xl font-semibold">Admin Dashboard</h1>
-        <p className="text-muted-foreground mt-1">All quotes, sign companies, and transactions in one place.</p>
+        <h1 className="text-2xl font-semibold">Overview</h1>
+        <p className="text-muted-foreground mt-1">Where things stand across the platform right now.</p>
       </div>
 
-      {/* ── Quotes / Bids ── */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Quotes</h2>
-        {bidRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No bids yet.</p>
-        ) : (
-          <div className="border border-border rounded-2xl overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Order</th>
-                  <th className="px-4 py-2 font-medium">SC</th>
-                  <th className="px-4 py-2 font-medium">Price</th>
-                  <th className="px-4 py-2 font-medium">Timeline</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2 font-medium">Order status</th>
-                  <th className="px-4 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {bidRows.map((bid) => {
-                  const orderStatus = bid.orders?.status
-                  const canSelect = bid.status === "pending" && (orderStatus === "bidding" || orderStatus === "submitted")
-                  return (
-                    <tr key={bid.id} className="border-t border-border">
-                      <td className="px-4 py-2">
-                        {bid.orders?.sign_spec?.business_name ?? bid.order_id.slice(0, 8)}
-                        <div className="text-xs text-muted-foreground capitalize">{bid.orders?.sign_spec?.sign_type?.replace("_", " ")}</div>
-                      </td>
-                      <td className="px-4 py-2">{bid.sc_companies?.name ?? "—"}</td>
-                      <td className="px-4 py-2">{formatCents(bid.price_cents)}</td>
-                      <td className="px-4 py-2">{bid.timeline_days}d</td>
-                      <td className="px-4 py-2 capitalize">{bid.status}</td>
-                      <td className="px-4 py-2 capitalize">{orderStatus ?? "—"}</td>
-                      <td className="px-4 py-2">
-                        {canSelect && (
-                          <form action={selectWinningBidAction.bind(null, bid.order_id, bid.id)}>
-                            <button
-                              type="submit"
-                              className="text-xs bg-accent text-accent-foreground rounded-2xl px-3 py-1.5 font-medium hover:opacity-90"
-                            >
-                              Select as winner
-                            </button>
-                          </form>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── SC Companies ── */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Sign Companies</h2>
-        {scRows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No sign companies yet.</p>
-        ) : (
-          <div className="border border-border rounded-2xl overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/40 text-left">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Name</th>
-                  <th className="px-4 py-2 font-medium">Location</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                  <th className="px-4 py-2 font-medium">Agreement</th>
-                  <th className="px-4 py-2 font-medium">Insurance</th>
-                  <th className="px-4 py-2 font-medium">Stripe</th>
-                  <th className="px-4 py-2 font-medium">Commission</th>
-                  <th className="px-4 py-2 font-medium"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {scRows.map((sc) => {
-                  const needsReview = sc.insurance_verified && !sc.insurance_reviewed_at
-                  return (
-                    <tr key={sc.id} className="border-t border-border">
-                      <td className="px-4 py-2 font-medium">{sc.name}</td>
-                      <td className="px-4 py-2">{[sc.city, sc.state].filter(Boolean).join(", ") || "—"}</td>
-                      <td className="px-4 py-2 capitalize">{sc.status}</td>
-                      <td className="px-4 py-2">{sc.agreement_signed_at ? "✓" : "—"}</td>
-                      <td className="px-4 py-2">
-                        {sc.insurance_verified ? (sc.insurance_reviewed_at ? "✓ reviewed" : "⋯ needs review") : "—"}
-                      </td>
-                      <td className="px-4 py-2">{sc.stripe_onboarding_complete ? "✓" : "—"}</td>
-                      <td className="px-4 py-2">{sc.commission_rate}%</td>
-                      <td className="px-4 py-2">
-                        {needsReview && (
-                          <form action={approveSCInsuranceReviewAction.bind(null, sc.id)}>
-                            <button
-                              type="submit"
-                              className="text-xs bg-accent text-accent-foreground rounded-2xl px-3 py-1.5 font-medium hover:opacity-90"
-                            >
-                              Approve review
-                            </button>
-                          </form>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
-
-      {/* ── Transactions ── */}
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Transactions</h2>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div>
-            <h3 className="text-sm font-semibold text-muted-foreground mb-2">Client Payments</h3>
-            {paymentRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No payments yet.</p>
-            ) : (
-              <div className="border border-border rounded-2xl overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-left">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Order</th>
-                      <th className="px-3 py-2 font-medium">Stage</th>
-                      <th className="px-3 py-2 font-medium">Amount</th>
-                      <th className="px-3 py-2 font-medium">Status</th>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {paymentRows.map((p) => (
-                      <tr key={p.id} className="border-t border-border">
-                        <td className="px-3 py-2">{p.orders?.sign_spec?.business_name ?? p.order_id.slice(0, 8)}</td>
-                        <td className="px-3 py-2 capitalize">{p.stage}</td>
-                        <td className="px-3 py-2">{formatCents(p.amount_cents)}</td>
-                        <td className="px-3 py-2 capitalize">{p.status}</td>
-                        <td className="px-3 py-2">{new Date(p.created_at).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <h3 className="text-sm font-semibold text-muted-foreground mb-2">SC Transfers</h3>
-            {transferRows.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No transfers yet.</p>
-            ) : (
-              <div className="border border-border rounded-2xl overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/40 text-left">
-                    <tr>
-                      <th className="px-3 py-2 font-medium">Order</th>
-                      <th className="px-3 py-2 font-medium">SC</th>
-                      <th className="px-3 py-2 font-medium">Milestone</th>
-                      <th className="px-3 py-2 font-medium">Amount</th>
-                      <th className="px-3 py-2 font-medium">Date</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {transferRows.map((t) => (
-                      <tr key={t.id} className="border-t border-border">
-                        <td className="px-3 py-2">{t.orders?.sign_spec?.business_name ?? t.order_id.slice(0, 8)}</td>
-                        <td className="px-3 py-2">{t.sc_companies?.name ?? "—"}</td>
-                        <td className="px-3 py-2 capitalize">{t.milestone.replace("_", " ")}</td>
-                        <td className="px-3 py-2">{formatCents(t.amount_cents)}</td>
-                        <td className="px-3 py-2">{new Date(t.created_at).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      </section>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        {tiles.map((tile) => (
+          <Link
+            key={tile.label}
+            href={tile.href}
+            className="border border-border rounded-2xl p-5 hover:border-accent transition-colors"
+          >
+            <div className="text-2xl font-semibold">{tile.value}</div>
+            <div className="text-sm text-muted-foreground mt-1">{tile.label}</div>
+          </Link>
+        ))}
+      </div>
     </div>
   )
 }

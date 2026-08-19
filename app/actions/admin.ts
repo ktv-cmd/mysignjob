@@ -89,7 +89,33 @@ export async function selectWinningBid(orderId: string, bidId: string): Promise<
     return { error: "Something went wrong selecting the winning bid. Please try again." }
   }
 
-  revalidatePath("/admin")
+  revalidatePath("/admin/quotes")
+  revalidatePath("/admin/orders")
+  return {}
+}
+
+// Records the admin's written resolution for a dispute and closes it out.
+// Disputes only ever move forward here (open/under_review -> resolved) —
+// there's no unresolve action, matching how the dispute lifecycle is modeled
+// in the schema (status defaults to 'open', admin_resolution is write-once).
+export async function resolveDispute(disputeId: string, resolution: string): Promise<{ error?: string }> {
+  const { supabase, user, error } = await requireAdmin()
+  if (error || !user) return { error }
+
+  const trimmed = resolution.trim()
+  if (!trimmed) return { error: "A resolution note is required." }
+
+  const { error: updateErr } = await supabase
+    .from("disputes")
+    .update({ status: "resolved", admin_resolution: trimmed })
+    .eq("id", disputeId)
+
+  if (updateErr) {
+    console.error("[resolveDispute] failed to update disputes", updateErr)
+    return { error: "Something went wrong saving the resolution. Please try again." }
+  }
+
+  revalidatePath("/admin/issues")
   return {}
 }
 
@@ -102,4 +128,8 @@ export async function selectWinningBidAction(orderId: string, bidId: string): Pr
 
 export async function approveSCInsuranceReviewAction(scId: string): Promise<void> {
   await approveSCInsuranceReview(scId)
+}
+
+export async function resolveDisputeAction(disputeId: string, formData: FormData): Promise<void> {
+  await resolveDispute(disputeId, String(formData.get("resolution") ?? ""))
 }

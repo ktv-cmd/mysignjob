@@ -30,6 +30,35 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
   redirect("/dashboard")
 }
 
+// Dedicated sign-in path for /admin/login. Same credential check as signIn,
+// but a non-admin account is signed back out immediately and gets a generic
+// error — never distinguishing "wrong password" from "not an admin", which
+// would otherwise let this form be used to probe which emails have admin.
+export async function adminSignIn(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const email = String(formData.get("email") ?? "").trim()
+  const password = String(formData.get("password") ?? "")
+
+  const supabase = await createClient()
+  const { error } = await supabase.auth.signInWithPassword({ email, password })
+  if (error) return { error: "Invalid credentials." }
+
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return { error: "Invalid credentials." }
+
+  const { data: profile } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", user.id)
+    .single()
+
+  if (profile?.role !== "admin") {
+    await supabase.auth.signOut()
+    return { error: "Invalid credentials." }
+  }
+
+  redirect("/admin")
+}
+
 export async function signUpClient(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const email = String(formData.get("email") ?? "").trim()
   const password = String(formData.get("password") ?? "")
@@ -51,10 +80,12 @@ export async function signUpClient(_prev: AuthState, formData: FormData): Promis
 export async function signUpSC(_prev: AuthState, formData: FormData): Promise<AuthState> {
   const email = String(formData.get("email") ?? "").trim()
   const password = String(formData.get("password") ?? "")
+  const confirmPassword = String(formData.get("confirm_password") ?? "")
   const fullName = String(formData.get("full_name") ?? "").trim()
   const companyName = String(formData.get("company_name") ?? "").trim()
 
   if (password.length < 8) return { error: "Password must be at least 8 characters." }
+  if (password !== confirmPassword) return { error: "Passwords do not match." }
   if (!companyName) return { error: "Company name is required." }
 
   const supabase = await createClient()

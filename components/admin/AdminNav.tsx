@@ -9,10 +9,13 @@ import BrandLogo from "@/components/shared/BrandLogo"
 export default function AdminNav() {
   const pathname = usePathname()
 
-  // Quotes, SC companies, and transactions all live on one consolidated
-  // dashboard page rather than separate list pages.
   const links = [
     { href: "/admin", label: "Overview" },
+    { href: "/admin/orders", label: "Orders" },
+    { href: "/admin/quotes", label: "Quotes" },
+    { href: "/admin/companies", label: "Companies" },
+    { href: "/admin/transactions", label: "Transactions" },
+    { href: "/admin/issues", label: "Issues" },
   ]
 
   return (
