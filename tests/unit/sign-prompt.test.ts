@@ -21,18 +21,18 @@ describe("buildSignPrompt — lighting style plumbing (6-value fix)", () => {
     expect(unique.size).toBe(STYLES.length - 1)
   })
 
-  it("only mentions side-mounted LED accents for front_side / back_side / full", () => {
+  it("only mentions the side-lit edge accent for front_side / back_side / full", () => {
     for (const style of ["front_side", "back_side", "full"] as const) {
-      expect(buildSignPrompt({ ...baseParams, lightingType: style })).toContain("side-mounted")
+      expect(buildSignPrompt({ ...baseParams, lightingType: style })).toContain("side-lit")
     }
     for (const style of ["front", "back", "front_back", "both"] as const) {
-      expect(buildSignPrompt({ ...baseParams, lightingType: style })).not.toContain("side-mounted")
+      expect(buildSignPrompt({ ...baseParams, lightingType: style })).not.toContain("side-lit")
     }
   })
 
-  it("mentions 360° surround glow only for the full style", () => {
-    expect(buildSignPrompt({ ...baseParams, lightingType: "full" })).toMatch(/360/)
-    expect(buildSignPrompt({ ...baseParams, lightingType: "front_back" })).not.toMatch(/360/)
+  it("mentions all three techniques together only for the full style", () => {
+    expect(buildSignPrompt({ ...baseParams, lightingType: "full" })).toContain("front-lit + back-lit + side-lit together")
+    expect(buildSignPrompt({ ...baseParams, lightingType: "front_back" })).not.toContain("together")
   })
 })
 
